@@ -6,6 +6,7 @@
 #include <map>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -56,6 +57,8 @@ public:
     bool remove_parameter(const std::string& key);
 
 private:
+    friend class Storage;
+    Item(ItemId id, Parameters parameters) : id_(id), parameters_(std::move(parameters)) {}
     ItemId id_;
     Parameters parameters_;
 };
@@ -120,6 +123,10 @@ public:
     bool remove_parameter(const std::string& key);
     bool set_item_parameter(ItemId id, std::string key, Value value);
     bool remove_item_parameter(ItemId id, const std::string& key);
+
+    // Versioned JSON snapshot; ID strings preserve the full uint64_t range.
+    std::string to_json() const;
+    void load_json(std::string_view json); // Replaces data atomically; throws on invalid input.
 
     void set_action_provider(ActionProvider provider);
     ActionList actions(ItemId id, const Context& context = {}) const;

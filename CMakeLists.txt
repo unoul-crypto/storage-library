@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(game_storage VERSION 0.1.0 LANGUAGES CXX)
+project(game_storage VERSION 0.2.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 
 option(GAME_STORAGE_BUILD_TESTS "Build core tests" ${PROJECT_IS_TOP_LEVEL})
@@ -8,7 +8,7 @@ option(GAME_STORAGE_BUILD_UI "Build renderer-independent table behavior" ON)
 option(GAME_STORAGE_BUILD_RAYLIB "Build the optional raylib renderer" OFF)
 set(GAME_STORAGE_RAYLIB_SOURCE_DIR "" CACHE PATH "Optional existing raylib source directory")
 
-add_library(game_storage STATIC src/storage.cpp)
+add_library(game_storage STATIC src/storage.cpp src/json.cpp)
 add_library(game_storage::game_storage ALIAS game_storage)
 target_include_directories(game_storage PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>

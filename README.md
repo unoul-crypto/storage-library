@@ -19,8 +19,8 @@ input scrolls vertically. Game rules and transfers remain under developer contro
 - [Two-storage UI example](examples/table.cpp)
 - [Core API](include/game_storage/storage.hpp) and [UI API](include/game_storage/ui.hpp)
 
-Slots, stacks, partial extraction, persistence, and drag-and-drop transfers are not
-implemented in this version.
+Slots, stacks, partial extraction, and drag-and-drop transfers are not implemented
+in this version. Storage data can be saved and restored through versioned JSON.
 
 ## Build and test
 
@@ -70,7 +70,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.1 CONFIG REQUIRED)
+find_package(game_storage 0.2 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -104,8 +104,9 @@ auto removed = bag.extract(sword.id()); // optional<Item>
 - Copying an item preserves its ID and deep-copies its parameters. To create
   another instance of the same item type, construct `Item(existing.parameters())`.
 - IDs are unique across new items within one linked library instance during a
-  process/module lifetime. They are not save-file, distributed, or cross-module
-  identifiers. Persistence and ID restoration are outside this first version.
+  process/module lifetime. JSON snapshots preserve and restore them. They are not
+  distributed or cross-module identifiers; loading separate snapshots with
+  overlapping IDs is the game's responsibility.
 - `add` copies an item. Duplicate IDs are rejected within the receiving storage;
   different storages do not share a global ownership registry. Use `transfer_to`
   for movement instead of adding the same snapshot to multiple storages.
@@ -138,6 +139,42 @@ The game decides when to call them. Transfer to the same storage is always a
 storages unchanged. The destination copy completes before source removal;
 allocation failures preserve the source. Extraction constructs the returned item
 before committing removal. These guarantees do not imply thread synchronization.
+
+## Saving and loading JSON
+
+`Storage::to_json()` returns a UTF-8 JSON string. `Storage::load_json()` replaces
+the receiving storage's items and parameters from that string. The library leaves
+file I/O to the game:
+
+```cpp
+const std::string save_data = chest.to_json();
+// Write save_data to a file, database, or browser storage.
+
+Storage restored;
+restored.load_json(save_data);
+```
+
+The format is versioned. A minimal snapshot looks like this:
+
+```json
+{"version":1,"parameters":{"label":"Chest"},"items":[{"id":"42","parameters":{"type":"sword","durability":80}}]}
+```
+
+IDs are decimal **strings**, so the full 64-bit range survives JavaScript JSON
+handling. The loader preserves item order, IDs, nested values, and the difference
+between integers and doubles. A new item created after loading receives an ID
+above every restored ID. Existing runtime action providers remain attached to the
+storage and are not included in JSON.
+
+Loading is a replacement, not a merge. Invalid syntax, unsupported versions,
+duplicate or invalid IDs, malformed fields, and nonfinite numbers are rejected
+with `std::invalid_argument`; the existing storage remains unchanged. Serialization
+also rejects nonfinite doubles and invalid UTF-8. The format accepts up to 128
+levels of nesting. A snapshot restores one storage at a time; the game should save
+every storage it needs. IDs are unique among newly created items in one linked
+library instance, but copying an item or loading the same snapshot into two
+storages can intentionally create the same ID in both. Cross-storage ownership
+remains the game's responsibility.
 
 ## Actions
 
@@ -217,7 +254,7 @@ For the graphical browser example, follow [the WebAssembly UI build](docs/ui.md#
 
 ## Validation
 
-The current implementation has 59 core checks and 37 UI behavior checks, run through
+The current implementation has core and UI behavior checks, run through
 CTest on Windows/MSVC and WebAssembly/Node. The graphical example was also checked
 on desktop and in a browser for PNG loading, horizontal dragging, vertical wheel
 scrolling, action menus, and table refresh after an action. Installed CMake packages

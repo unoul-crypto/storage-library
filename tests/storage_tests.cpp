@@ -1,6 +1,7 @@
 #include <game_storage/storage.hpp>
 
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace game_storage;
@@ -176,6 +177,78 @@ void callback_errors() {
     catch (const std::runtime_error&) { caught = true; }
     check(caught, "Handler exception propagates to game");
 }
+
+void json_snapshots() {
+    Storage original({{"label", "Saved chest"}, {"empty", nullptr},
+                      {"nested", Value::Object{{"array", Value::Array{true, 4, 1.25}}}}});
+    Item first({{"name", "Potion"}, {"description", "A quote: \" and a newline:\n"},
+                {"fraction", 1.0}, {"zero", -0.0}});
+    Item second({{"name", "Gem"}, {"tags", Value::Array{"rare", nullptr}}});
+    original.add(first);
+    original.add(second);
+    const auto json = original.to_json();
+    check(json.find("\"version\":1") != std::string::npos, "Snapshot declares a version");
+    check(json.find("\"id\":\"") != std::string::npos, "IDs are JSON strings");
+    check(json.find("\\n") != std::string::npos, "Control characters are escaped");
+    Storage restored({{"old", true}});
+    restored.add(Item());
+    int provider_calls = 0;
+    restored.set_action_provider([&](const Item&, const Storage&, const Context&) {
+        ++provider_calls;
+        return std::vector<Action>{};
+    });
+    restored.load_json(json);
+    check(restored.to_json() == json, "Snapshot round-trips exactly");
+    check(restored.items()[0].id() == first.id() && restored.items()[1].id() == second.id(), "IDs and order survive load");
+    check(restored.items()[0].parameter("fraction")->as<double>() == 1.0, "Double remains double");
+    check(restored.items()[0].parameter("zero")->as<double>() == 0.0, "Negative zero remains double");
+    check(restored.parameter("nested")->as<Value::Object>().at("array").as<Value::Array>()[1] == Value(4),
+          "Nested storage values survive load");
+    check(!restored.parameter("old"), "Load replaces old parameters");
+    restored.actions(first.id());
+    check(provider_calls == 1, "Runtime action provider remains attached");
+    restored.extract(first.id());
+    check(restored.items()[0].id() == second.id(), "Restored items remain operable");
+
+    const auto before = restored.to_json();
+    const std::vector<std::string> invalid = {
+        "", "{", "[]", json + " trailing", "{\"version\":2,\"parameters\":{},\"items\":[]}",
+        "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"0\",\"parameters\":{}}]}",
+        "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"01\",\"parameters\":{}}]}",
+        "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"1\",\"parameters\":{}},{\"id\":\"1\",\"parameters\":{}}]}",
+        "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"18446744073709551616\",\"parameters\":{}}]}",
+        "{\"version\":1,\"parameters\":{\"x\":01},\"items\":[]}",
+        "{\"version\":1,\"parameters\":{\"x\":1e9999},\"items\":[]}",
+        "{\"version\":1,\"parameters\":{\"x\":\"\\ud800\"},\"items\":[]}",
+        "{\"version\":1,\"parameters\":{\"x\":true,\"x\":false},\"items\":[]}",
+        "{\"version\":1,\"parameters\":{},\"items\":[],\"extra\":1}"
+    };
+    for (const auto& bad : invalid) {
+        bool threw = false;
+        try { restored.load_json(bad); } catch (const std::invalid_argument&) { threw = true; }
+        check(threw, "Invalid JSON must be rejected");
+        check(restored.to_json() == before, "Failed load must preserve storage");
+    }
+    original.set_parameter("infinite", std::numeric_limits<double>::infinity());
+    bool threw = false;
+    try { original.to_json(); } catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "Non-finite doubles cannot be serialized");
+    original.remove_parameter("infinite");
+    original.set_parameter("bad_utf8", std::string(1, static_cast<char>(0xff)));
+    threw = false;
+    try { original.to_json(); } catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "Invalid UTF-8 cannot be serialized");
+
+    Storage large_id;
+    large_id.load_json("{\"version\":1,\"parameters\":{\"symbol\":\"\\u20ac\"},\"items\":[{\"id\":\"9007199254740993\",\"parameters\":{\"n\":-9223372036854775808}}]}");
+    check(large_id.items()[0].id() == 9007199254740993ULL, "IDs above JavaScript safe integer survive");
+    check(large_id.item(9007199254740993ULL)->parameter("n") == std::optional<Value>{std::numeric_limits<std::int64_t>::min()},
+          "Minimum signed integer survives");
+    check(large_id.parameter("symbol") == std::optional<Value>{std::string("\xe2\x82\xac")}, "Unicode escape decoded");
+    Item later;
+    check(later.id() > 9007199254740993ULL, "New IDs advance beyond restored IDs");
+    check(large_id.to_json().find("9007199254740993") != std::string::npos, "Large ID serializes exactly");
+}
 } // namespace
 
 int main() {
@@ -185,6 +258,7 @@ int main() {
         transfers();
         actions();
         callback_errors();
+        json_snapshots();
         std::cout << "Passed " << checks << " checks\n";
         return 0;
     } catch (const std::exception& error) {

@@ -2,24 +2,36 @@
 
 #include <algorithm>
 #include <atomic>
+#include <charconv>
 #include <exception>
 #include <limits>
 #include <set>
 #include <stdexcept>
 
 namespace game_storage {
+namespace detail {
+Value parse_json_value(std::string_view text);
+std::string encode_json_value(const Value& value);
+}
 namespace {
+std::atomic<ItemId> next_item_id{1};
 ItemId next_id() {
-    static std::atomic<ItemId> next{1};
-    auto value = next.load(std::memory_order_relaxed);
+    auto value = next_item_id.load(std::memory_order_relaxed);
     for (;;) {
         if (value == std::numeric_limits<ItemId>::max()) {
             throw std::overflow_error("Item ID space exhausted");
         }
-        if (next.compare_exchange_weak(value, value + 1, std::memory_order_relaxed)) {
+        if (next_item_id.compare_exchange_weak(value, value + 1, std::memory_order_relaxed)) {
             return value;
         }
     }
+}
+
+void reserve_ids_through(ItemId last) noexcept {
+    const ItemId desired = last == std::numeric_limits<ItemId>::max() ? last : last + 1;
+    auto current = next_item_id.load(std::memory_order_relaxed);
+    while (current < desired && !next_item_id.compare_exchange_weak(
+        current, desired, std::memory_order_relaxed)) {}
 }
 
 std::optional<Value> lookup(const Parameters& parameters, const std::string& key) {
@@ -106,6 +118,56 @@ bool Storage::set_item_parameter(ItemId id, std::string key, Value value) {
 bool Storage::remove_item_parameter(ItemId id, const std::string& key) {
     const auto it = find(id);
     return it != items_.end() && it->remove_parameter(key);
+}
+std::string Storage::to_json() const {
+    Value::Array entries;
+    entries.reserve(items_.size());
+    for (const auto& item : items_) {
+        entries.emplace_back(Value::Object{{"id", std::to_string(item.id())},
+                                           {"parameters", item.parameters()}});
+    }
+    return detail::encode_json_value(Value::Object{{"version", 1},
+                                                    {"parameters", parameters_},
+                                                    {"items", std::move(entries)}});
+}
+void Storage::load_json(std::string_view json) {
+    const Value root = detail::parse_json_value(json);
+    const auto* object = std::get_if<Value::Object>(&root.data);
+    if (!object || object->size() != 3 || object->count("version") != 1 ||
+        object->count("parameters") != 1 || object->count("items") != 1 ||
+        object->at("version") != Value(1))
+        throw std::invalid_argument("Unsupported storage JSON schema or version");
+    const auto* loaded_parameters = std::get_if<Value::Object>(&object->at("parameters").data);
+    const auto* entries = std::get_if<Value::Array>(&object->at("items").data);
+    if (!loaded_parameters || !entries) throw std::invalid_argument("Invalid storage JSON fields");
+
+    std::vector<Item> loaded_items;
+    loaded_items.reserve(entries->size());
+    std::set<ItemId> ids;
+    ItemId highest = 0;
+    for (const auto& entry : *entries) {
+        const auto* fields = std::get_if<Value::Object>(&entry.data);
+        if (!fields || fields->size() != 2 || fields->count("id") != 1 ||
+            fields->count("parameters") != 1)
+            throw std::invalid_argument("Invalid item JSON fields");
+        const auto* id_text = std::get_if<std::string>(&fields->at("id").data);
+        const auto* item_parameters = std::get_if<Value::Object>(&fields->at("parameters").data);
+        if (!id_text || !item_parameters || id_text->empty() ||
+            (id_text->size() > 1 && id_text->front() == '0'))
+            throw std::invalid_argument("Invalid item ID or parameters");
+        ItemId id = 0;
+        const auto parsed = std::from_chars(id_text->data(), id_text->data() + id_text->size(), id);
+        if (parsed.ec != std::errc{} || parsed.ptr != id_text->data() + id_text->size() ||
+            id == 0 || !ids.insert(id).second)
+            throw std::invalid_argument("Invalid or duplicate item ID");
+        loaded_items.push_back(Item(id, *item_parameters));
+        highest = std::max(highest, id);
+    }
+    Parameters loaded_storage_parameters = *loaded_parameters;
+    // No operation below can allocate or invoke application callbacks.
+    reserve_ids_through(highest);
+    items_.swap(loaded_items);
+    parameters_.swap(loaded_storage_parameters);
 }
 void Storage::set_action_provider(ActionProvider provider) {
     action_provider_ = std::move(provider);
