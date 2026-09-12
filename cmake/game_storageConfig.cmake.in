@@ -1,2 +1,11 @@
 @PACKAGE_INIT@
 include("${CMAKE_CURRENT_LIST_DIR}/game_storageTargets.cmake")
+set(game_storage_core_FOUND TRUE)
+set(game_storage_ui_FOUND @GAME_STORAGE_BUILD_UI@)
+set(game_storage_raylib_FOUND @GAME_STORAGE_BUILD_RAYLIB@)
+if("raylib" IN_LIST game_storage_FIND_COMPONENTS AND game_storage_raylib_FOUND)
+    include(CMakeFindDependencyMacro)
+    find_dependency(raylib CONFIG)
+    include("${CMAKE_CURRENT_LIST_DIR}/game_storageRaylibTargets.cmake")
+endif()
+check_required_components(game_storage)

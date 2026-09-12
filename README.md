@@ -1,7 +1,26 @@
 # Game Storage
 
-A C++17 logical core for desktop and WebAssembly games. No graphics, engine APIs,
-third-party libraries, capacity rules, slots, stacks, or partial extraction.
+A C++17 storage library for desktop and WebAssembly games, with an optional table
+interface. Developers own game rules, item presentation, ordering, and actions.
+
+| Module / CMake target | What it provides |
+| --- | --- |
+| `game_storage::game_storage` | Items, parameters, extraction, transfers, and actions; no graphics dependencies |
+| `game_storage::ui` | Table layout, scrolling, selection, tooltips, and menus; no rendering API |
+| `game_storage::raylib` | Optional raylib drawing, PNG loading, and input adapter |
+
+The interface supports text and PNG cells, computed values from external context,
+developer-controlled ordering, hover tooltips, right-click action menus, and one or
+two tables with independent horizontal and vertical scrolling. Normal mouse-wheel
+input scrolls vertically. Game rules and transfers remain under developer control.
+
+- [UI setup, customization, and graphical demo](docs/ui.md)
+- [Core usage example](examples/basic.cpp)
+- [Two-storage UI example](examples/table.cpp)
+- [Core API](include/game_storage/storage.hpp) and [UI API](include/game_storage/ui.hpp)
+
+Slots, stacks, partial extraction, persistence, and drag-and-drop transfers are not
+implemented in this version.
 
 ## Build and test
 
@@ -12,6 +31,22 @@ cmake -S . -B build/desktop
 cmake --build build/desktop --config Release
 ctest --test-dir build/desktop -C Release --output-on-failure
 ```
+
+The default build includes the core and UI behavior, without raylib or a graphical
+window. Enable `GAME_STORAGE_BUILD_RAYLIB` for the graphical example described in
+[the UI guide](docs/ui.md). Building a raylib source checkout also requires the
+CMake version requested by that checkout (3.25+ for the tested raylib 6.0 checkout).
+
+| CMake option | Default | Purpose |
+| --- | --- | --- |
+| `GAME_STORAGE_BUILD_UI` | `ON` | Build renderer-independent UI behavior |
+| `GAME_STORAGE_BUILD_RAYLIB` | `OFF` | Build the renderer; requires UI and raylib |
+| `GAME_STORAGE_RAYLIB_SOURCE_DIR` | Empty | Use an existing raylib source directory instead of finding an installed package |
+| `GAME_STORAGE_BUILD_TESTS` | `ON` for standalone builds | Build core and enabled UI tests |
+| `GAME_STORAGE_BUILD_EXAMPLES` | `ON` for standalone builds | Build the core example and, if enabled, the graphical example |
+
+For the core alone, configure with both `-DGAME_STORAGE_BUILD_UI=OFF` and
+`-DGAME_STORAGE_BUILD_RAYLIB=OFF`. No dependencies are downloaded automatically.
 
 On Windows, if CMake is not on PATH, set a PowerShell variable to its executable
 and replace `cmake` with `& $cmake` (and use `ctest.exe` from the same directory).
@@ -111,6 +146,8 @@ read-only storage, and game-supplied `Context` dictionary and returns actions.
 The provider may also capture external game state. See `examples/basic.cpp`.
 
 ```cpp
+// Put the previously extracted item back before trying its actions.
+if (removed) bag.add(*removed);
 bag.set_action_provider([](const Item&, const Storage&, const Context& context) {
     const auto it = context.find("can_drop");
     const bool enabled = it != context.end() && it->second == Value(true);
@@ -175,3 +212,13 @@ demonstration, not an inventory UI. C++ exceptions are enabled transitively for
 Emscripten to match desktop behavior. The library is static and does not require
 Emscripten shared-library support. A direct JavaScript/TypeScript API (for a game
 not written in C++) would need a separate binding layer; none is included yet.
+
+For the graphical browser example, follow [the WebAssembly UI build](docs/ui.md#build-the-graphical-example).
+
+## Validation
+
+The current implementation has 59 core checks and 37 UI behavior checks, run through
+CTest on Windows/MSVC and WebAssembly/Node. The graphical example was also checked
+on desktop and in a browser for PNG loading, horizontal dragging, vertical wheel
+scrolling, action menus, and table refresh after an action. Installed CMake packages
+were checked with UI-only and raylib consumers, as well as a core-only build.
