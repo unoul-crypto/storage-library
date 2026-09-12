@@ -89,8 +89,18 @@ Input RaylibRenderer::poll_input() {
             IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL),
             IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)};
 }
+void RaylibRenderer::custom(std::optional<std::size_t> panel, Rect bounds) {
+    if (bounds.height <= 0) return;
+    fill(bounds, theme_.header);
+    if (!custom_drawer_ || bounds.width <= 0) return;
+    clip_to(bounds);
+    try { custom_drawer_(panel, bounds); }
+    catch (...) { EndScissorMode(); throw; }
+    EndScissorMode();
+}
 void RaylibRenderer::draw(const Frame& frame, Point mouse) {
-    for (const auto& panel : frame.panels) {
+    for (std::size_t panel_index = 0; panel_index < frame.panels.size(); ++panel_index) {
+        const auto& panel = frame.panels[panel_index];
         fill(panel.bounds, theme_.panel);
         cell({panel.title, {}}, {panel.bounds.x, panel.bounds.y, panel.bounds.width, panel.header.y - panel.bounds.y}, panel.bounds, theme_.accent);
         fill(panel.header, theme_.header);
@@ -114,7 +124,12 @@ void RaylibRenderer::draw(const Frame& frame, Point mouse) {
         if (!panel.total_rows) cell({"No items", {}}, {panel.body.x, panel.body.y, panel.body.width, 44}, panel.body, theme_.muted);
         fill(panel.horizontal_track, theme_.track); fill(panel.vertical_track, theme_.track);
         fill(panel.horizontal_thumb, theme_.thumb); fill(panel.vertical_thumb, theme_.thumb);
+        custom(panel_index, panel.footer);
         outline(panel.bounds, theme_.border);
+    }
+    if (frame.shared_footer.height > 0) {
+        custom(std::nullopt, frame.shared_footer);
+        outline(frame.shared_footer, theme_.border);
     }
     if (frame.tooltip) {
         const auto& tip = *frame.tooltip;

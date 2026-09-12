@@ -15,13 +15,15 @@ two tables with independent horizontal and vertical scrolling. Normal mouse-whee
 input scrolls vertically. Ctrl adds items to selection; Shift adds a sorted range.
 Actions apply to every selected item where the game permits them. Game rules and
 transfers remain under developer control.
+Each table can reserve a footer for game-owned controls, and the view can reserve
+one shared footer below both tables. The game supplies drawing and input behavior.
 
 - [UI setup, customization, and graphical demo](docs/ui.md)
 - [Core usage example](examples/basic.cpp)
 - [Two-storage UI example](examples/table.cpp)
 - [Core API](include/game_storage/storage.hpp) and [UI API](include/game_storage/ui.hpp)
 
-Slots, stacks, partial extraction, and drag-and-drop transfers are not implemented
+Item slots, stacks, partial extraction, and drag-and-drop transfers are not implemented
 in this version. Storage data can be saved and restored through versioned JSON.
 
 ## Build and test
@@ -72,7 +74,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.3 CONFIG REQUIRED)
+find_package(game_storage 0.4 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 

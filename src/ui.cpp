@@ -40,6 +40,8 @@ void View::set_panels(std::vector<Panel> panels) {
     if (panels.size() > 2) throw std::invalid_argument("A view supports at most two storages");
     for (const auto& panel : panels) {
         if (!panel.storage) throw std::invalid_argument("Panel storage is null");
+        if (!std::isfinite(panel.footer_height) || panel.footer_height < 0)
+            throw std::invalid_argument("Panel footer height must be nonnegative and finite");
         for (const auto& column : panel.table.columns)
             if (!std::isfinite(column.width) || column.width <= 0)
                 throw std::invalid_argument("Column width must be positive and finite");
@@ -49,9 +51,18 @@ void View::set_panels(std::vector<Panel> panels) {
     hover_.reset(); menu_.reset(); drag_.reset(); last_action_.reset(); last_actions_.clear();
     hover_time_ = 0; menu_offset_ = 0; frame_ = {};
 }
+void View::set_shared_footer_height(float height) {
+    if (!std::isfinite(height) || height < 0)
+        throw std::invalid_argument("Shared footer height must be nonnegative and finite");
+    shared_footer_height_ = height;
+}
 void View::layout(Rect bounds, const Context& context) {
     frame_.panels.clear();
+    frame_.shared_footer = {};
     if (panels_.empty()) return;
+    const float shared_height = std::min(shared_footer_height_, bounds.height);
+    const float panel_height = bounds.height - shared_height;
+    frame_.shared_footer = {bounds.x, bounds.y + panel_height, bounds.width, shared_height};
     const float gap = panels_.size() == 2 ? std::min(metrics_.gap, bounds.width) : 0;
     const float width = (bounds.width - gap) / static_cast<float>(panels_.size());
     for (std::size_t p = 0; p < panels_.size(); ++p) {
@@ -59,14 +70,17 @@ void View::layout(Rect bounds, const Context& context) {
         auto& state = states_[p];
         PanelFrame f;
         f.title = panel.title;
-        f.bounds = {bounds.x + static_cast<float>(p) * (width + gap), bounds.y, width, bounds.height};
-        const float title = std::min(metrics_.title_height, bounds.height);
-        const float header = std::min(metrics_.header_height, bounds.height - title);
+        f.bounds = {bounds.x + static_cast<float>(p) * (width + gap), bounds.y, width, panel_height};
+        const float footer_height = std::min(panel.footer_height, panel_height);
+        const float table_height = panel_height - footer_height;
+        f.footer = {f.bounds.x, bounds.y + table_height, width, footer_height};
+        const float title = std::min(metrics_.title_height, table_height);
+        const float header = std::min(metrics_.header_height, table_height - title);
         const float bar_x = std::min(metrics_.scrollbar, width);
-        const float bar_y = std::min(metrics_.scrollbar, bounds.height - title - header);
+        const float bar_y = std::min(metrics_.scrollbar, table_height - title - header);
         f.header = {f.bounds.x, bounds.y + title, std::max(0.0f, width - bar_x), header};
         f.body = {f.bounds.x, f.header.y + header, f.header.width,
-                  std::max(0.0f, bounds.height - title - header - bar_y)};
+                  std::max(0.0f, table_height - title - header - bar_y)};
         f.horizontal_track = {f.body.x, f.body.y + f.body.height, f.body.width, bar_y};
         f.vertical_track = {f.body.x + f.body.width, f.body.y, bar_x, f.body.height};
         auto items = panel.storage->items();
@@ -208,7 +222,7 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
     }
     for (std::size_t p = 0; p < frame_.panels.size(); ++p) {
         const auto& f = frame_.panels[p];
-        if (f.bounds.contains(input.mouse) && !drag_) {
+        if (f.bounds.contains(input.mouse) && !f.footer.contains(input.mouse) && !drag_) {
             states_[p].y = clamp(states_[p].y - input.wheel_y * metrics_.wheel_step, f.max_y);
             states_[p].x = clamp(states_[p].x - input.wheel_x * metrics_.wheel_step, f.max_x);
             if (input.left_pressed) {

@@ -20,11 +20,14 @@ class RaylibRenderer {
 public:
     // Optional resolver returns borrowed textures; the game owns their lifetime.
     using ImageResolver = std::function<Texture2D(const std::string&)>;
+    // Called while clipped to each reserved region. nullopt denotes the shared footer.
+    using CustomDrawer = std::function<void(std::optional<std::size_t> panel, Rect bounds)>;
     explicit RaylibRenderer(Theme theme = {}, ImageResolver resolver = {});
     ~RaylibRenderer(); // Destroy before CloseWindow().
     RaylibRenderer(const RaylibRenderer&) = delete;
     RaylibRenderer& operator=(const RaylibRenderer&) = delete;
     Theme& theme() noexcept { return theme_; }
+    void set_custom_drawer(CustomDrawer drawer) { custom_drawer_ = std::move(drawer); }
     void clear_images(); // Clears owned PNG cache; also allows retrying failed paths.
     void draw(const Frame& frame, Point mouse);
     static Input poll_input();
@@ -32,8 +35,10 @@ public:
 private:
     Theme theme_;
     ImageResolver resolver_;
+    CustomDrawer custom_drawer_;
     std::map<std::string, Texture2D> images_;
     Texture2D image(const std::string& key);
+    void custom(std::optional<std::size_t> panel, Rect bounds);
     void cell(const Cell& content, Rect bounds, Rect clip, Color color);
     void text(const std::string& value, Rect bounds, Color color, float size);
 };

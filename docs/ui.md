@@ -41,7 +41,8 @@ try { & ./Release/storage_ui_example.exe } finally { Pop-Location }
 ```
 
 See [the complete demo](../examples/table.cpp) for custom prices, sorting, PNGs,
-tooltips, and core action handlers. Its [browser shell](../examples/web_shell.html)
+tooltips, capacity footers, a shared transfer button, and core action handlers.
+Its [browser shell](../examples/web_shell.html)
 fills the browser viewport and suppresses the canvas context menu.
 
 With an activated Emscripten environment and Ninja:
@@ -130,6 +131,50 @@ Callbacks can derive content from external systems via context or captured state
 display values do not have to exist in the item dictionary. Exceptions propagate
 to the game. Only visible rows run cell callbacks, but ordering receives the full
 list each update. This version favors simple synchronous snapshots over caching.
+
+## Add game-owned UI inside the view
+
+Set `Panel::footer_height` for each table and `View::set_shared_footer_height` for
+an optional full-width region beneath the panels. Heights are screen-coordinate
+units, must be finite and nonnegative, and are clamped to the available view height.
+Both default to zero. With two panels, each table still sits beside the other;
+the shared footer spans the complete view. `PanelFrame::footer` and
+`Frame::shared_footer` expose the allocated rectangles, including after a resize.
+The view reserves space but does not define their content or game rules.
+
+```cpp
+view.set_panels({{&chest, "Chest", table, 48}, {&bag, "Bag", table, 48}});
+view.set_shared_footer_height(52);
+renderer.set_custom_drawer([&](std::optional<std::size_t> panel, gui::Rect area) {
+    if (panel) {
+        const Storage& owner = *(*panel == 0 ? &chest : &bag);
+        // Draw owner.size(), capacity from owner.parameter("capacity"), etc.
+    } else {
+        // Draw a shared button, status area, or other game-specific control.
+    }
+});
+```
+
+The raylib callback runs once for every nonempty panel footer and once for the
+nonempty shared footer. `panel` is the zero-based panel index; `std::nullopt` means
+the shared footer. Drawing is clipped to the supplied rectangle and occurs after
+the tables but before tooltips and action menus. The callback uses the game's
+raylib drawing calls and must not open its own scissor mode. The game owns any
+captured data and textures, which must remain valid during drawing.
+
+Handle pointer input in the game loop using the same frame and input passed to the
+view. For example, after `view.update(...)`, check
+`input.left_pressed && frame.shared_footer.contains(input.mouse)` and then test
+the game's button rectangle within that region. The view captures pointer input
+inside either footer, but it does not select table rows, open item menus, or scroll
+the table there. The game defines what a control does and may refresh the view
+after changing storage. See the [example](../examples/table.cpp) for a working
+capacity panel and a button that transfers selected items.
+
+Other renderers can draw directly from these rectangles and route input the same
+way; no raylib types enter the core or `ui::View`. The reserved region is an
+extension point for arbitrary game UI, including nested controls managed entirely
+by the game.
 
 ## Integrate with a game loop
 
@@ -222,11 +267,12 @@ wheel deltas, Escape key, and frame duration to `ui::Input`, then call `View::up
 Draw the resulting `Frame` using the game's own graphics API:
 
 - `PanelFrame` provides titles, columns, visible rows, scroll offsets, clipping
-  rectangles, scrollbar tracks/thumbs, and selected/hovered item IDs. Highlight
+  rectangles, footer bounds, scrollbar tracks/thumbs, and selected/hovered item IDs. Highlight
   every ID in `selected_ids` when rendering multi-selection.
 - Start column drawing at `body.x - scroll_x`; row bounds already include vertical
   scrolling. Clip row content to `body` and headings to `header`.
 - Draw the optional tooltip and menu after the panels, using their supplied bounds.
+  Draw `Frame::shared_footer` below the panels if enabled.
   Resolve each `Cell::png` asset key through the game's own texture system.
 - `captures_pointer` tells the host whether to withhold pointer input from the
   world. The view executes menu actions through the core; a renderer only draws.

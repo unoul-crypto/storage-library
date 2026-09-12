@@ -30,6 +30,7 @@ struct Panel {
     Storage* storage = nullptr; // Must outlive the view and its update calls.
     std::string title;
     TableConfig table;
+    float footer_height = 0; // Reserved for game-owned UI below this table.
 };
 struct Metrics {
     float title_height = 40, header_height = 32, row_height = 44;
@@ -48,6 +49,7 @@ struct RowFrame { ItemId id; Rect bounds; std::vector<Cell> cells; };
 struct PanelFrame {
     std::string title;
     Rect bounds, header, body, horizontal_track, horizontal_thumb, vertical_track, vertical_thumb;
+    Rect footer; // Game-owned region; no built-in behavior.
     std::vector<Column> columns;
     std::vector<RowFrame> rows; // Only rows intersecting the viewport.
     std::size_t total_rows = 0;
@@ -64,6 +66,7 @@ struct MenuFrame {
 };
 struct Frame {
     std::vector<PanelFrame> panels;
+    Rect shared_footer; // Full-width game-owned region below both panels (or one panel).
     std::optional<TooltipFrame> tooltip;
     std::optional<MenuFrame> menu;
     bool captures_pointer = false;
@@ -75,6 +78,7 @@ class View {
 public:
     explicit View(Metrics metrics = {});
     void set_panels(std::vector<Panel> panels); // Zero, one, or two; resets UI state.
+    void set_shared_footer_height(float height); // Zero disables the shared region.
     const Frame& update(Rect bounds, const Input& input, const Context& context = {});
     const Frame& frame() const noexcept { return frame_; }
     const std::optional<ActionEvent>& last_action() const noexcept { return last_action_; }
@@ -90,6 +94,7 @@ private:
     struct Target { std::size_t panel; ItemId item; };
     struct Drag { std::size_t panel; bool horizontal; float offset; };
     Metrics metrics_;
+    float shared_footer_height_ = 0;
     std::vector<Panel> panels_;
     std::vector<State> states_;
     Frame frame_;

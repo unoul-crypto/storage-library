@@ -1,6 +1,7 @@
 #include <game_storage/ui.hpp>
 #include <algorithm>
 #include <iostream>
+#include <limits>
 #include <stdexcept>
 
 using namespace game_storage;
@@ -278,9 +279,55 @@ void range_across_scrolled_rows() {
     check(frame.panels[0].selected_ids.size() == expected_size - 1,
           "Removed items leave selection automatically");
 }
+void custom_regions() {
+    Storage a, b;
+    for (int i = 0; i < 12; ++i) a.add(Item());
+    gui::View view;
+    view.set_panels({{&a, "A", config(), 45}, {&b, "B", config(), 70}});
+    view.set_shared_footer_height(35);
+    const gui::Rect bounds{10, 20, 800, 320};
+    const Context context{{"label", "Text"}};
+    auto frame = view.update(bounds, {}, context);
+    check(frame.shared_footer.y == 305 && frame.shared_footer.height == 35,
+          "Shared footer reserves bottom space across both panels");
+    check(frame.panels[0].footer.height == 45 && frame.panels[1].footer.height == 70,
+          "Each panel has its own footer height");
+    check(frame.panels[0].body.y + frame.panels[0].body.height <= frame.panels[0].footer.y,
+          "Table body does not overlap custom footer");
+    check(frame.panels[0].footer.y + frame.panels[0].footer.height == frame.shared_footer.y,
+          "Panel footer ends at shared footer");
+    gui::Input input;
+    input.mouse = center(frame.panels[0].footer);
+    input.left_pressed = true; input.wheel_y = -2;
+    frame = view.update(bounds, input, context);
+    check(frame.captures_pointer && frame.panels[0].scroll_y == 0 && frame.panels[0].selected_ids.empty(),
+          "Custom panel input is captured without selecting or scrolling the table");
+    input = {}; input.mouse = center(frame.shared_footer); input.right_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.captures_pointer && !frame.menu, "Shared region captures input without opening a table menu");
+    frame = view.update({10, 20, 800, 25}, {}, context);
+    check(frame.shared_footer.height == 25 && frame.panels[0].footer.height == 0 && frame.panels[0].body.height == 0,
+          "Custom regions clamp safely in a tiny viewport");
+    bool threw = false;
+    try { view.set_shared_footer_height(-1); } catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "Negative shared height rejected");
+    threw = false;
+    try { view.set_panels({{&a, "A", config(), std::numeric_limits<float>::infinity()}}); }
+    catch (const std::invalid_argument&) { threw = true; }
+    check(threw, "Nonfinite panel height rejected");
+    view.set_panels({{&a, "A", config(), 45}});
+    frame = view.update(bounds, {}, context);
+    check(frame.panels.size() == 1 && frame.panels[0].footer.width == bounds.width &&
+          frame.shared_footer.width == bounds.width,
+          "Single storage can use both custom regions at full width");
+    view.set_panels({});
+    frame = view.update(bounds, {}, context);
+    check(frame.shared_footer.height == 0 && !frame.captures_pointer,
+          "Closed view has no shared region or pointer capture");
+}
 }
 int main() {
-    try { interaction(); menus(); ordering_and_validation(); multiple_selection_and_actions(); range_across_scrolled_rows(); }
+    try { interaction(); menus(); ordering_and_validation(); multiple_selection_and_actions(); range_across_scrolled_rows(); custom_regions(); }
     catch (const std::exception& error) { std::cerr << "Check " << checks << ": " << error.what() << '\n'; return 1; }
     std::cout << "Passed " << checks << " UI checks\n";
 }
