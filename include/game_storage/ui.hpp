@@ -1,6 +1,7 @@
 #pragma once
 
 #include "storage.hpp"
+#include <set>
 
 namespace game_storage::ui {
 
@@ -41,6 +42,7 @@ struct Input {
     float wheel_y = 0, wheel_x = 0, seconds = 0;
     bool left_pressed = false, left_down = false;
     bool right_pressed = false, escape = false;
+    bool ctrl = false, shift = false;
 };
 struct RowFrame { ItemId id; Rect bounds; std::vector<Cell> cells; };
 struct PanelFrame {
@@ -51,6 +53,7 @@ struct PanelFrame {
     std::size_t total_rows = 0;
     float scroll_x = 0, scroll_y = 0, max_x = 0, max_y = 0;
     std::optional<ItemId> selected, hovered;
+    std::vector<ItemId> selected_ids; // Selected items in the current display order.
 };
 struct TooltipFrame { Rect bounds; Tooltip content; float row_height = 44; };
 struct MenuEntry { Rect bounds; ActionInfo action; std::string label; };
@@ -75,9 +78,15 @@ public:
     const Frame& update(Rect bounds, const Input& input, const Context& context = {});
     const Frame& frame() const noexcept { return frame_; }
     const std::optional<ActionEvent>& last_action() const noexcept { return last_action_; }
+    const std::vector<ActionEvent>& last_actions() const noexcept { return last_actions_; }
 
 private:
-    struct State { float x = 0, y = 0; std::optional<ItemId> selected; };
+    struct State {
+        float x = 0, y = 0;
+        std::set<ItemId> selected;
+        std::optional<ItemId> anchor, primary;
+        std::vector<ItemId> order;
+    };
     struct Target { std::size_t panel; ItemId item; };
     struct Drag { std::size_t panel; bool horizontal; float offset; };
     Metrics metrics_;
@@ -90,6 +99,7 @@ private:
     float hover_time_ = 0;
     std::size_t menu_offset_ = 0;
     std::optional<ActionEvent> last_action_;
+    std::vector<ActionEvent> last_actions_;
     void layout(Rect bounds, const Context& context);
     void layout_menu(Rect bounds, const Context& context);
 };

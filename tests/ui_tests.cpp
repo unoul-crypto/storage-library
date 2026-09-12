@@ -154,9 +154,133 @@ void ordering_and_validation() {
     check(view.update({0, 0, 0, 0}, {}).panels.empty(), "View can close all panels");
     check(!view.update({0, 0, 500, 300}, {}).captures_pointer, "Closed view does not capture game input");
 }
+void multiple_selection_and_actions() {
+    Storage storage, other;
+    for (int i = 0; i < 6; ++i) storage.add(Item({{"eligible", i % 2 == 0}, {"index", i}}));
+    other.add(Item());
+    const auto original = storage.items();
+    storage.set_action_provider([](const Item& item, const Storage&, const Context&) {
+        const bool eligible = item.parameter("eligible") == std::optional<Value>{true};
+        std::vector<Action> actions{{{"mark", eligible, "Unavailable"},
+            [](Storage& owner, ItemId id, const Context&) { owner.set_item_parameter(id, "marked", true); }}};
+        if (item.parameter("index") == std::optional<Value>{2})
+            actions.push_back({{"special", true, {}}, [](Storage&, ItemId, const Context&) {}});
+        return actions;
+    });
+    auto table = config();
+    table.order = [](std::vector<Item> items, const Context&) {
+        std::reverse(items.begin(), items.end());
+        return items;
+    };
+    gui::View view;
+    view.set_panels({{&storage, "A", table}, {&other, "B", config()}});
+    const gui::Rect bounds{0, 0, 1000, 500};
+    const Context context{{"label", "Text"}};
+    auto frame = view.update(bounds, {}, context);
+    const auto ids = frame.panels[0].rows;
+    check(ids[0].id == original[5].id(), "Test display order is sorted in reverse");
+    gui::Input input;
+    input.mouse = center(ids[1].bounds); input.left_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids == std::vector<ItemId>{ids[1].id}, "Normal click selects one item");
+    input = {}; input.mouse = center(ids[4].bounds); input.left_pressed = input.ctrl = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids == (std::vector<ItemId>{ids[1].id, ids[4].id}), "Ctrl adds without clearing selection");
+    input = {}; input.mouse = center(ids[2].bounds); input.left_pressed = input.shift = true;
+    frame = view.update(bounds, input, context);
+    const std::vector<ItemId> selected{ids[1].id, ids[2].id, ids[3].id, ids[4].id};
+    check(frame.panels[0].selected_ids == selected, "Shift adds sorted inclusive range to existing selection");
+    check(frame.panels[0].selected == ids[2].id, "Primary selection follows last click");
+    input = {}; input.mouse = center(frame.panels[1].rows[0].bounds); input.left_pressed = input.ctrl = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[1].selected_ids.size() == 1 && frame.panels[0].selected_ids == selected,
+          "Selection is independent for adjacent storages");
+
+    // Right-click an ineligible selected item: the menu uses the group's union.
+    input = {}; input.mouse = center(ids[4].bounds); input.right_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.menu.has_value() && frame.panels[0].selected_ids == selected,
+          "Right click on selected item preserves group");
+    const auto mark = std::find_if(frame.menu->entries.begin(), frame.menu->entries.end(),
+        [](const gui::MenuEntry& entry) { return entry.action.id == "mark"; });
+    check(mark != frame.menu->entries.end() && mark->action.enabled,
+          "Action enabled when at least one selected item allows it");
+    check(std::any_of(frame.menu->entries.begin(), frame.menu->entries.end(),
+        [](const gui::MenuEntry& entry) { return entry.action.id == "special"; }),
+          "Menu includes actions available on only part of the group");
+    input = {}; input.mouse = center(mark->bounds); input.left_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(!frame.menu, "Successful batch action closes menu");
+    check(view.last_actions().size() == 4, "Batch records a result for every selected item");
+    for (std::size_t i = 0; i < selected.size(); ++i) {
+        check(view.last_actions()[i].item == selected[i], "Batch uses sorted display order");
+        const auto expected = (i == 0 || i == 2) ? ActionStatus::executed : ActionStatus::disabled;
+        check(view.last_actions()[i].result.status == expected, "Batch skips ineligible items");
+        check(storage.item(selected[i])->parameter("marked").has_value() == (expected == ActionStatus::executed),
+              "Only eligible items changed");
+    }
+    check(view.last_action()->item == selected.back(), "Last action compatibility accessor remains available");
+    input = {}; frame = view.update(bounds, input, context);
+    check(view.last_actions().empty() && !view.last_action(), "Batch results reset on next update");
+    input.mouse = center(ids[2].bounds); input.right_pressed = true;
+    frame = view.update(bounds, input, context);
+    const auto special = std::find_if(frame.menu->entries.begin(), frame.menu->entries.end(),
+        [](const gui::MenuEntry& entry) { return entry.action.id == "special"; });
+    check(special != frame.menu->entries.end(), "Partial-group action stays in menu");
+    input = {}; input.mouse = center(special->bounds); input.left_pressed = true;
+    view.update(bounds, input, context);
+    check(view.last_actions().size() == 4, "Partial-group action reports each selected item");
+    for (std::size_t i = 0; i < selected.size(); ++i)
+        check(view.last_actions()[i].result.status == (i == 2 ? ActionStatus::executed : ActionStatus::action_not_found),
+              "Action absent on an item is skipped");
+    check(other.size() == 1, "Batch action does not affect second storage");
+    frame = view.update(bounds, {}, context);
+    input = {};
+    input.mouse = center(ids[5].bounds); input.right_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids == std::vector<ItemId>{ids[5].id},
+          "Right click on unselected item starts a new group");
+    input = {}; input.escape = true;
+    view.update(bounds, input, context);
+    input = {}; input.mouse = center(ids[0].bounds); input.left_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids == std::vector<ItemId>{ids[0].id}, "Ordinary click clears previous group");
+}
+void range_across_scrolled_rows() {
+    Storage storage;
+    for (int i = 0; i < 16; ++i) storage.add(Item({{"index", i}}));
+    auto table = config();
+    table.order = [](std::vector<Item> items, const Context&) {
+        std::reverse(items.begin(), items.end()); return items;
+    };
+    gui::View view;
+    view.set_panels({{&storage, "Items", table}});
+    const gui::Rect bounds{0, 0, 500, 300};
+    const Context context{{"label", "Text"}};
+    auto frame = view.update(bounds, {}, context);
+    const auto anchor = frame.panels[0].rows[0].id;
+    gui::Input input;
+    input.mouse = center(frame.panels[0].rows[0].bounds); input.left_pressed = true;
+    view.update(bounds, input, context);
+    input = {}; input.mouse = center(frame.panels[0].body); input.wheel_y = -10;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].rows.front().id != anchor, "Anchor is offscreen after scrolling");
+    const auto target = frame.panels[0].rows.front().id;
+    input = {}; input.mouse = center(frame.panels[0].rows.front().bounds);
+    input.left_pressed = input.shift = true;
+    frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids.front() == anchor && frame.panels[0].selected_ids.back() == target,
+          "Shift range follows full sorted list across viewport");
+    const auto expected_size = frame.panels[0].selected_ids.size();
+    check(expected_size > 5, "Offscreen items are included in range");
+    storage.extract(anchor);
+    input = {}; frame = view.update(bounds, input, context);
+    check(frame.panels[0].selected_ids.size() == expected_size - 1,
+          "Removed items leave selection automatically");
+}
 }
 int main() {
-    try { interaction(); menus(); ordering_and_validation(); }
+    try { interaction(); menus(); ordering_and_validation(); multiple_selection_and_actions(); range_across_scrolled_rows(); }
     catch (const std::exception& error) { std::cerr << "Check " << checks << ": " << error.what() << '\n'; return 1; }
     std::cout << "Passed " << checks << " UI checks\n";
 }

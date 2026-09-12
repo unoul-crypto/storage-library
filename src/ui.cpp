@@ -46,7 +46,7 @@ void View::set_panels(std::vector<Panel> panels) {
     }
     panels_ = std::move(panels);
     states_.assign(panels_.size(), {});
-    hover_.reset(); menu_.reset(); drag_.reset(); last_action_.reset();
+    hover_.reset(); menu_.reset(); drag_.reset(); last_action_.reset(); last_actions_.clear();
     hover_time_ = 0; menu_offset_ = 0; frame_ = {};
 }
 void View::layout(Rect bounds, const Context& context) {
@@ -81,6 +81,20 @@ void View::layout(Rect bounds, const Context& context) {
             }
         }
         f.total_rows = items.size();
+        state.order.clear();
+        state.order.reserve(items.size());
+        for (const auto& item : items) state.order.push_back(item.id());
+        const std::set<ItemId> visible_ids(state.order.begin(), state.order.end());
+        for (auto it = state.selected.begin(); it != state.selected.end();) {
+            if (!visible_ids.count(*it))
+                it = state.selected.erase(it);
+            else ++it;
+        }
+        if (state.anchor && !state.selected.count(*state.anchor)) state.anchor.reset();
+        if (state.primary && !state.selected.count(*state.primary)) state.primary.reset();
+        if (!state.primary && !state.selected.empty()) state.primary = *state.selected.begin();
+        for (ItemId id : state.order) if (state.selected.count(id)) f.selected_ids.push_back(id);
+        f.selected = state.primary;
         f.columns = panel.table.columns;
         float content_width = 0;
         for (const auto& column : f.columns) content_width += column.width;
@@ -88,10 +102,6 @@ void View::layout(Rect bounds, const Context& context) {
         f.max_y = std::max(0.0f, static_cast<float>(items.size()) * metrics_.row_height - f.body.height);
         state.x = clamp(state.x, f.max_x); state.y = clamp(state.y, f.max_y);
         f.scroll_x = state.x; f.scroll_y = state.y;
-        if (state.selected && std::none_of(items.begin(), items.end(), [&](const Item& item) {
-                return item.id() == *state.selected;
-            })) state.selected.reset();
-        f.selected = state.selected;
         f.horizontal_thumb = thumb(f.horizontal_track, state.x, f.max_x, f.body.width, true);
         f.vertical_thumb = thumb(f.vertical_track, state.y, f.max_y, f.body.height, false);
         const auto first = static_cast<std::size_t>(state.y / metrics_.row_height);
@@ -109,13 +119,27 @@ void View::layout(Rect bounds, const Context& context) {
 void View::layout_menu(Rect bounds, const Context& context) {
     frame_.menu.reset();
     if (!menu_) return;
-    if (states_[menu_->panel].selected != menu_->item) { menu_.reset(); return; }
+    if (!states_[menu_->panel].selected.count(menu_->item)) { menu_.reset(); return; }
     const auto& panel = panels_[menu_->panel];
-    const auto catalog = panel.storage->actions(menu_->item, context);
-    // A filtered or removed item cannot keep a stale menu open.
-    if (catalog.status != ActionStatus::ready) { menu_.reset(); return; }
+    const auto& selected = frame_.panels[menu_->panel].selected_ids;
+    std::vector<ActionInfo> actions;
+    std::map<std::string, std::size_t> indices;
+    for (ItemId id : selected) {
+        const auto catalog = panel.storage->actions(id, context);
+        if (catalog.status != ActionStatus::ready) continue;
+        for (const auto& action : catalog.actions) {
+            const auto inserted = indices.emplace(action.id, actions.size());
+            if (inserted.second) actions.push_back(action);
+            else {
+                auto& combined = actions[inserted.first->second];
+                if (action.enabled) { combined.enabled = true; combined.disabled_reason.clear(); }
+                else if (!combined.enabled && combined.disabled_reason.empty())
+                    combined.disabled_reason = action.disabled_reason;
+            }
+        }
+    }
     const auto slots = std::max<std::size_t>(1, static_cast<std::size_t>(bounds.height / metrics_.menu_row_height));
-    const auto count = catalog.actions.size();
+    const auto count = actions.size();
     menu_offset_ = std::min(menu_offset_, count > slots ? count - slots : 0);
     const auto visible = std::min(slots, count);
     MenuFrame f;
@@ -123,7 +147,7 @@ void View::layout_menu(Rect bounds, const Context& context) {
                      static_cast<float>(std::max<std::size_t>(1, visible)) * metrics_.menu_row_height);
     f.more_above = menu_offset_ > 0; f.more_below = menu_offset_ + visible < count;
     for (std::size_t i = 0; i < visible; ++i) {
-        const auto& action = catalog.actions[menu_offset_ + i];
+        const auto& action = actions[menu_offset_ + i];
         f.entries.push_back({{f.bounds.x, f.bounds.y + static_cast<float>(i) * metrics_.menu_row_height,
                               f.bounds.width, std::min(metrics_.menu_row_height, f.bounds.height - static_cast<float>(i) * metrics_.menu_row_height)},
                              action, panel.table.action_label ? panel.table.action_label(action, context) : action.id});
@@ -135,7 +159,7 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
                     input.seconds, input.wheel_x, input.wheel_y})
         if (!std::isfinite(v)) throw std::invalid_argument("UI input must be finite");
     bounds.width = std::max(0.0f, bounds.width); bounds.height = std::max(0.0f, bounds.height);
-    frame_.tooltip.reset(); last_action_.reset();
+    frame_.tooltip.reset(); last_action_.reset(); last_actions_.clear();
     frame_.captures_pointer = (!panels_.empty() && bounds.contains(input.mouse)) || menu_.has_value() || drag_.has_value();
     layout(bounds, context);
     if (input.escape) { menu_.reset(); hover_.reset(); hover_time_ = 0; drag_.reset(); }
@@ -153,9 +177,15 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
                 const auto entries = frame_.menu->entries;
                 for (const auto& entry : entries) if (entry.bounds.contains(input.mouse)) {
                     const auto target = *menu_;
-                    const auto result = panels_[target.panel].storage->execute_action(target.item, entry.action.id, context);
-                    last_action_ = ActionEvent{target.panel, target.item, entry.action.id, result};
-                    if (result.status != ActionStatus::disabled) menu_.reset();
+                    const auto selected = frame_.panels[target.panel].selected_ids;
+                    bool close_menu = false;
+                    for (ItemId id : selected) {
+                        const auto result = panels_[target.panel].storage->execute_action(id, entry.action.id, context);
+                        last_actions_.push_back(ActionEvent{target.panel, id, entry.action.id, result});
+                        last_action_ = last_actions_.back();
+                        if (result.status != ActionStatus::disabled) close_menu = true;
+                    }
+                    if (close_menu) menu_.reset();
                     layout(bounds, context); layout_menu(bounds, context);
                     break;
                 }
@@ -207,7 +237,32 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
         if (!f.body.contains(input.mouse)) continue;
         for (const auto& row : f.rows) if (row.bounds.contains(input.mouse)) {
             hit = Target{p, row.id}; f.hovered = row.id;
-            if (input.left_pressed || input.right_pressed) { states_[p].selected = row.id; f.selected = row.id; }
+            if (input.left_pressed || input.right_pressed) {
+                auto& state = states_[p];
+                if (input.right_pressed) {
+                    if (!state.selected.count(row.id)) {
+                        state.selected.clear(); state.selected.insert(row.id); state.anchor = row.id;
+                    }
+                } else if (input.shift) {
+                    state.selected.insert(row.id);
+                    if (state.anchor) {
+                        const auto start = std::find(state.order.begin(), state.order.end(), *state.anchor);
+                        const auto end = std::find(state.order.begin(), state.order.end(), row.id);
+                        if (start != state.order.end() && end != state.order.end()) {
+                            const auto low = std::min(start, end), high = std::max(start, end);
+                            state.selected.insert(low, high + 1);
+                        }
+                    } else state.anchor = row.id;
+                } else if (input.ctrl) {
+                    state.selected.insert(row.id); state.anchor = row.id;
+                } else {
+                    state.selected.clear(); state.selected.insert(row.id); state.anchor = row.id;
+                }
+                state.primary = row.id;
+                f.selected = row.id;
+                f.selected_ids.clear();
+                for (ItemId id : state.order) if (state.selected.count(id)) f.selected_ids.push_back(id);
+            }
             break;
         }
     }

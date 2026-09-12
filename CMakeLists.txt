@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(game_storage VERSION 0.2.0 LANGUAGES CXX)
+project(game_storage VERSION 0.3.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 
 option(GAME_STORAGE_BUILD_TESTS "Build core tests" ${PROJECT_IS_TOP_LEVEL})

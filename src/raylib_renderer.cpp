@@ -85,7 +85,9 @@ Input RaylibRenderer::poll_input() {
     const auto wheel = GetMouseWheelMoveV();
     return {{mouse.x, mouse.y}, wheel.y, wheel.x, GetFrameTime(),
             IsMouseButtonPressed(MOUSE_BUTTON_LEFT), IsMouseButtonDown(MOUSE_BUTTON_LEFT),
-            IsMouseButtonPressed(MOUSE_BUTTON_RIGHT), IsKeyPressed(KEY_ESCAPE)};
+            IsMouseButtonPressed(MOUSE_BUTTON_RIGHT), IsKeyPressed(KEY_ESCAPE),
+            IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL),
+            IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)};
 }
 void RaylibRenderer::draw(const Frame& frame, Point mouse) {
     for (const auto& panel : frame.panels) {
@@ -99,7 +101,8 @@ void RaylibRenderer::draw(const Frame& frame, Point mouse) {
         }
         for (const auto& row : panel.rows) {
             Color background = row.id % 2 ? theme_.alternate : theme_.panel;
-            if (panel.selected == row.id) background = theme_.selected;
+            if (std::find(panel.selected_ids.begin(), panel.selected_ids.end(), row.id) != panel.selected_ids.end())
+                background = theme_.selected;
             else if (panel.hovered == row.id) background = theme_.hover;
             fill(intersection(row.bounds, panel.body), background);
             x = panel.body.x - panel.scroll_x;

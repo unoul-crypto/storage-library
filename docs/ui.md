@@ -29,8 +29,8 @@ ctest --test-dir build/ui-desktop -C Release --output-on-failure
 Run `Release/storage_ui_example.exe` from **build/ui-desktop** on MSVC (or
 `./storage_ui_example` with a single-configuration generator). The working directory
 must contain the copied `assets` directory. The example owns its window and loop;
-neither library module creates a window. `--smoke` renders four hidden frames,
-writes `storage-ui.png`, and exits on desktop.
+neither library module creates a window. `--smoke` renders a few hidden frames,
+shows Ctrl/Shift selection in `storage-ui.png`, and exits on desktop.
 
 For example, after building with MSVC, run these PowerShell commands from the
 repository root:
@@ -171,11 +171,25 @@ are single-threaded and synchronous. Avoid reentrant updates from callbacks.
   input affects it horizontally; the bottom thumb also works with an ordinary mouse.
 - Left click selects a row by item ID. Hover opens a developer-supplied tooltip after
   `Metrics::tooltip_delay`. Moving to another row, scrolling, or leaving resets it.
+- Ctrl+left click adds a row to the selection; Shift+left click adds the inclusive
+  range from the last selection anchor through the clicked row, using the current
+  developer-defined display order. Ctrl+Shift also adds that range. A plain left
+  click starts a new selection. Each of two tables keeps its own selection.
+  `PanelFrame::selected_ids` exposes all selected IDs in display order;
+  `PanelFrame::selected` is the primary selection, normally the last clicked ID.
 - Right click opens that item's action menu. Labels use `TableConfig::action_label`
-  or the core action ID. Disabled reasons are shown. Empty catalogs show `No actions`.
+  or the core action ID. Right-clicking a selected row keeps the group; right-clicking
+  an unselected row starts a new selection. The menu combines actions from all
+  selected items in that table. An action is enabled if any selected item enables
+  it. Disabled reasons are shown. Empty catalogs show `No actions`.
 - The current catalog is refreshed while the menu is open, and the core rechecks it
-  on execution. Pass current context every frame. Inspect `view.last_action()` during
-  the same frame to receive the action result; it resets at the next update.
+  on execution for each selected item, in display order. Items for which an action
+  is missing or disabled are skipped without invoking a handler. Pass current
+  context every frame. Inspect `view.last_actions()` during the same frame to see
+  each item's `ActionResult` (including skipped statuses); the vector clears at the
+  next update. `last_action()` remains available as the final per-item result.
+  The batch runs sequentially and is not transactional: if a handler throws,
+  changes made by earlier handlers remain in storage.
 - Escape or an outside click dismisses the menu without clicking through. Disabled
   actions leave it open; other results close it. Menus with many actions scroll by
   wheel, with colored edge indicators for additional entries.
@@ -208,7 +222,8 @@ wheel deltas, Escape key, and frame duration to `ui::Input`, then call `View::up
 Draw the resulting `Frame` using the game's own graphics API:
 
 - `PanelFrame` provides titles, columns, visible rows, scroll offsets, clipping
-  rectangles, scrollbar tracks/thumbs, and selected/hovered item IDs.
+  rectangles, scrollbar tracks/thumbs, and selected/hovered item IDs. Highlight
+  every ID in `selected_ids` when rendering multi-selection.
 - Start column drawing at `body.x - scroll_x`; row bounds already include vertical
   scrolling. Clip row content to `body` and headings to `header`.
 - Draw the optional tooltip and menu after the panels, using their supplied bounds.

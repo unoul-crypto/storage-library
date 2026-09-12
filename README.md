@@ -12,7 +12,9 @@ interface. Developers own game rules, item presentation, ordering, and actions.
 The interface supports text and PNG cells, computed values from external context,
 developer-controlled ordering, hover tooltips, right-click action menus, and one or
 two tables with independent horizontal and vertical scrolling. Normal mouse-wheel
-input scrolls vertically. Game rules and transfers remain under developer control.
+input scrolls vertically. Ctrl adds items to selection; Shift adds a sorted range.
+Actions apply to every selected item where the game permits them. Game rules and
+transfers remain under developer control.
 
 - [UI setup, customization, and graphical demo](docs/ui.md)
 - [Core usage example](examples/basic.cpp)
@@ -70,7 +72,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.2 CONFIG REQUIRED)
+find_package(game_storage 0.3 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 

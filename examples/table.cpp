@@ -69,7 +69,16 @@ struct Demo {
     }
     void tick() {
         auto input = gui::RaylibRenderer::poll_input();
-        if (smoke) { input.mouse = {100, 205}; input.seconds = 0.6f; }
+        if (smoke) {
+            input = {};
+            input.mouse = {100, 211.0f + static_cast<float>(frames) * 44.0f};
+            input.seconds = 0.6f;
+            if (frames < 3) {
+                input.left_pressed = true;
+                input.ctrl = frames == 1;
+                input.shift = frames == 2;
+            }
+        }
         const auto& frame = view.update({24, 118, static_cast<float>(GetScreenWidth()) - 48,
                                         static_cast<float>(GetScreenHeight()) - 170}, input, {{"price_multiplier", 2}});
         BeginDrawing();
@@ -77,11 +86,11 @@ struct Demo {
         DrawText("STORAGE / EXPLORER", 24, 24, 28, {230, 237, 244, 255});
         DrawText("Two storages. Your data, presentation and actions.", 24, 66, 18, {151, 168, 188, 255});
         renderer.draw(frame, input.mouse);
-        DrawText("Scroll to browse  /  Drag bottom bar for columns  /  Right-click for actions", 24,
+        DrawText("Wheel: rows  /  Drag: columns  /  Ctrl: add  /  Shift: range  /  Right-click: actions", 24,
                  GetScreenHeight() - 32, 16, {151, 168, 188, 255});
         EndDrawing();
         ++frames;
-        if (smoke && frames == 3) TakeScreenshot("storage-ui.png");
+        if (smoke && frames == 4) TakeScreenshot("storage-ui.png");
     }
 };
 
@@ -101,7 +110,7 @@ int main(int argc, char** argv) {
 #else
     {
         Demo app(smoke);
-        while (!WindowShouldClose() && (!smoke || app.frames < 4)) app.tick();
+        while (!WindowShouldClose() && (!smoke || app.frames < 5)) app.tick();
     }
     CloseWindow();
 #endif
