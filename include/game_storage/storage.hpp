@@ -140,6 +140,8 @@ public:
     bool remove_item_data_value(ItemId id, const std::string& key);
     bool set_entry_property(ItemId id, std::string key, Value value);
     bool remove_entry_property(ItemId id, const std::string& key);
+    // Atomically replaces both dictionaries, preserving the entry ID and order.
+    bool replace_item_content(ItemId id, Parameters item_data, Parameters entry_properties);
 
     // Versioned JSON snapshot; ID strings preserve the full uint64_t range.
     std::string to_json() const;

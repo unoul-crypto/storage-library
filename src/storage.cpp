@@ -146,6 +146,13 @@ bool Storage::remove_entry_property(ItemId id, const std::string& key) {
     const auto it = find(id);
     return it != items_.end() && it->remove_entry_property(key);
 }
+bool Storage::replace_item_content(ItemId id, Parameters item_data, Parameters entry_properties) {
+    const auto it = find(id);
+    if (it == items_.end()) return false;
+    it->item_data_.swap(item_data);
+    it->entry_properties_.swap(entry_properties);
+    return true;
+}
 std::string Storage::to_json() const {
     Value::Array entries;
     entries.reserve(items_.size());

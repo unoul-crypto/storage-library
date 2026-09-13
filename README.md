@@ -74,7 +74,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.5 CONFIG REQUIRED)
+find_package(game_storage 0.6 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -138,6 +138,35 @@ auto removed = bag.extract(sword.id()); // optional<Item>
   is absent; setting a parameter on a missing item returns false.
 - Storage objects cannot be copied or moved; use owning pointers when dynamic
   ownership is needed. Obtain item snapshots explicitly through `items()`.
+
+## Custom game classes
+
+Include `game_storage/item_adapter.hpp` to use the optional, header-only
+`ItemAdapter<T>` with the core target. No inheritance or graphics dependencies
+are required. The game provides two callbacks:
+
+- Encoder: `void(const T&, Parameters& item_data, Parameters& properties)`.
+  Assign the keys owned by your class; erase obsolete keys explicitly if needed.
+- Decoder: `T(const Parameters& item_data, const Parameters& properties)`.
+  Validate the game's type/schema and construct an independent object.
+
+`adapter.to_item(value, properties)` creates a new entry with a new ID, starting
+with empty item data and the optional supplied properties. Add it with
+`storage.add(entry)`. `adapter.from_item(entry)` reconstructs the game object.
+`adapter.update(storage, id, value)` updates an existing entry while preserving
+its ID, position, and any keys the encoder leaves untouched. Missing IDs return
+false without calling the encoder. Both dictionaries are committed together;
+an encoder exception leaves the stored entry unchanged. Callbacks must not mutate
+the storage or reenter its operations; external callback side effects cannot be
+rolled back. Decoder exceptions propagate to the game.
+
+The class object and stored entry are independent; changes require an explicit
+`update`. Keep the entry ID separately in the game. JSON remains version 2 and
+contains the dictionaries; adapters and C++ type names are not serialized. For
+heterogeneous items, the game can store a stable type key and choose its adapter
+when reading. Loading JSON itself does not invoke adapters or validate game types.
+See [the complete custom-class example](examples/custom_item.cpp), including a
+save/load round trip. Build/run `storage_adapter_example` like `storage_example`.
 
 ## Technical operations
 
