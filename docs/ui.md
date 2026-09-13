@@ -79,13 +79,16 @@ using namespace game_storage;
 namespace gui = game_storage::ui;
 
 Storage chest, bag;
-chest.add(Item({{"name", "Health potion"}}));
+chest.add(Item(Parameters{{"name", "Health potion"}}, Parameters{{"quantity", 1}}));
 Context context{{"display_price", "25 G"}};
 
 gui::TableConfig table;
 table.columns = {
     {"Item", 240, [](const Item& item, const Storage&, const Context&) {
-        return gui::Cell{item.parameter("name")->as<std::string>(), "assets/potion.png"};
+        return gui::Cell{item.item_data_value("name")->as<std::string>(), "assets/potion.png"};
+    }},
+    {"Quantity", 100, [](const Item& item, const Storage&, const Context&) {
+        return gui::Cell{std::to_string(item.entry_property("quantity")->as<std::int64_t>()), {}};
     }},
     {"Price", 120, [](const Item&, const Storage&, const Context& context) {
         return gui::Cell{context.at("display_price").as<std::string>(), {}};
@@ -100,7 +103,9 @@ view.set_panels({{&chest, "Chest", table}, {&bag, "Bag", table}});
 ```
 
 This snippet uses the example asset directory. Its item schema is application-owned:
-the `name` parameter and `display_price` context value must exist with string types.
+the `name` item-data value, `quantity` entry property, and `display_price` context
+value must exist with the indicated types. Construct such an entry with
+`Item(Parameters{{"name", "Health potion"}}, Parameters{{"quantity", 1}})`.
 
 To supply sorting, set `table.order` **before** passing the configuration to
 `set_panels` (include `<algorithm>` for this example):
@@ -108,7 +113,7 @@ To supply sorting, set `table.order` **before** passing the configuration to
 ```cpp
 table.order = [](std::vector<Item> items, const Context&) {
     std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-        return a.parameter("name")->as<std::string>() < b.parameter("name")->as<std::string>();
+        return a.item_data_value("name")->as<std::string>() < b.item_data_value("name")->as<std::string>();
     });
     return items;
 };
@@ -125,7 +130,8 @@ frame. Handlers registered on the core storage may change its contents.
 and positive widths are developer-defined. `TableConfig::order` receives snapshot
 items and context and returns the desired order (optionally filtered). There is no
 built-in header sorting. Foreign and duplicate IDs are ignored; changed snapshot
-parameters are not written back. Sorting never modifies the core storage list.
+data and entry properties are not written back. Sorting never modifies the core
+storage list.
 
 Callbacks can derive content from external systems via context or captured state;
 display values do not have to exist in the item dictionary. Exceptions propagate

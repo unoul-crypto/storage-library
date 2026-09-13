@@ -6,12 +6,13 @@ using namespace game_storage;
 int main() {
     Storage chest({{"label", "Wooden chest"}});
     Storage backpack;
-    Item potion({{"type", "health_potion"}, {"healing", 25}});
+    Item potion(Parameters{{"type", "health_potion"}, {"healing", 25}},
+                Parameters{{"quantity", 1}});
     chest.add(potion);
     chest.transfer_to(potion.id(), backpack);
 
     backpack.set_action_provider([](const Item& item, const Storage&, const Context& context) {
-        if (item.parameter("type") != std::optional<Value>{Value("health_potion")}) {
+        if (item.item_data_value("type") != std::optional<Value>{Value("health_potion")}) {
             return std::vector<Action>{};
         }
         const auto it = context.find("can_drink");

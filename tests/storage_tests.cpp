@@ -75,9 +75,39 @@ void parameters_and_snapshots() {
     check(storage.item(source.id())->id() == source.id(), "Metadata cannot overwrite technical identity");
 }
 
+void entry_properties() {
+    Item item(Parameters{{"type", "potion"}}, Parameters{{"quantity", 5},
+                                                          {"nested", Value::Object{{"slot", 2}}}});
+    check(item.item_data_value("type") == std::optional<Value>{"potion"}, "Item data has its own dictionary");
+    check(item.entry_property("quantity") == std::optional<Value>{5}, "Entry property is readable");
+    Storage storage;
+    storage.add(item);
+    item.set_entry_property("quantity", 99);
+    check(storage.item(item.id())->entry_property("quantity") == std::optional<Value>{5},
+          "Add copies entry properties independently");
+    auto snapshot = storage.items();
+    snapshot[0].set_entry_property("quantity", 77);
+    auto nested = snapshot[0].entry_properties();
+    nested.at("nested").as<Value::Object>()["slot"] = 10;
+    check(storage.item(item.id())->entry_property("quantity") == std::optional<Value>{5} &&
+          storage.item(item.id())->entry_property("nested")->as<Value::Object>().at("slot") == Value(2),
+          "Entry snapshots do not mutate storage");
+    check(storage.set_entry_property(item.id(), "quantity", 3), "Stored entry property can change");
+    check(storage.item(item.id())->entry_property("quantity") == std::optional<Value>{3},
+          "Entry property update is visible");
+    check(storage.remove_entry_property(item.id(), "quantity"), "Stored entry property can be removed");
+    check(!storage.remove_entry_property(item.id(), "quantity") && !storage.set_entry_property(0, "x", 1),
+          "Missing entry property and item return false");
+    check(storage.set_item_data_value(item.id(), "type", "elixir") &&
+          storage.item(item.id())->parameter("type") == std::optional<Value>{"elixir"},
+          "New item-data operations and old parameter accessor agree");
+    check(storage.remove_item_data_value(item.id(), "type") && !storage.remove_item_data_value(item.id(), "type"),
+          "Item-data removal reports whether a value existed");
+}
+
 void transfers() {
     Storage a, b;
-    Item item({{"type", "key"}});
+    Item item(Parameters{{"type", "key"}}, Parameters{{"quantity", 2}});
     a.add(item);
     check(a.transfer_to(item.id(), a) == TransferResult::same_storage, "Self-transfer is a no-op");
     check(a.size() == 1, "Self-transfer preserves source");
@@ -89,6 +119,8 @@ void transfers() {
     check(a.transfer_to(item.id(), b) == TransferResult::transferred, "Valid transfer must succeed");
     check(a.size() == 0 && b.size() == 1, "Transfer must move exactly one item");
     check(b.item(item.id())->parameters() == item.parameters(), "Transfer must preserve parameters");
+    check(b.item(item.id())->entry_properties() == item.entry_properties(),
+          "Transfer preserves entry properties");
 }
 
 void actions() {
@@ -187,7 +219,10 @@ void json_snapshots() {
     original.add(first);
     original.add(second);
     const auto json = original.to_json();
-    check(json.find("\"version\":1") != std::string::npos, "Snapshot declares a version");
+    check(json.find("\"version\":2") != std::string::npos, "Snapshot declares version 2");
+    check(json.find("\"item_data\":") != std::string::npos &&
+          json.find("\"properties\":") != std::string::npos,
+          "Snapshot stores item data and entry properties separately");
     check(json.find("\"id\":\"") != std::string::npos, "IDs are JSON strings");
     check(json.find("\\n") != std::string::npos, "Control characters are escaped");
     Storage restored({{"old", true}});
@@ -212,7 +247,10 @@ void json_snapshots() {
 
     const auto before = restored.to_json();
     const std::vector<std::string> invalid = {
-        "", "{", "[]", json + " trailing", "{\"version\":2,\"parameters\":{},\"items\":[]}",
+        "", "{", "[]", json + " trailing", "{\"version\":3,\"parameters\":{},\"items\":[]}",
+        "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{}}]}",
+        "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":null}]}",
+        "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":{},\"parameters\":{}}]}",
         "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"0\",\"parameters\":{}}]}",
         "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"01\",\"parameters\":{}}]}",
         "{\"version\":1,\"parameters\":{},\"items\":[{\"id\":\"1\",\"parameters\":{}},{\"id\":\"1\",\"parameters\":{}}]}",
@@ -248,6 +286,22 @@ void json_snapshots() {
     Item later;
     check(later.id() > 9007199254740993ULL, "New IDs advance beyond restored IDs");
     check(large_id.to_json().find("9007199254740993") != std::string::npos, "Large ID serializes exactly");
+
+    Storage migrated;
+    migrated.load_json("{\"version\":1,\"parameters\":{\"label\":\"Old chest\"},\"items\":[{\"id\":\"42\",\"parameters\":{\"type\":\"potion\",\"quantity\":5}}]}");
+    check(migrated.item(42)->item_data_value("quantity") == std::optional<Value>{5} &&
+          migrated.item(42)->entry_properties().empty(),
+          "Version 1 item parameters migrate wholly to item_data");
+    check(migrated.to_json().find("\"version\":2") != std::string::npos,
+          "Loaded version 1 data is saved as version 2");
+
+    Storage with_properties;
+    Item stack(Parameters{{"type", "potion"}}, Parameters{{"quantity", 7}});
+    with_properties.add(stack);
+    Storage round_trip;
+    round_trip.load_json(with_properties.to_json());
+    check(round_trip.item(stack.id())->entry_property("quantity") == std::optional<Value>{7},
+          "Version 2 entry properties survive JSON round-trip");
 }
 } // namespace
 
@@ -255,6 +309,7 @@ int main() {
     try {
         storage_operations();
         parameters_and_snapshots();
+        entry_properties();
         transfers();
         actions();
         callback_errors();

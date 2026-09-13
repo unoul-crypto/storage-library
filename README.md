@@ -74,7 +74,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.4 CONFIG REQUIRED)
+find_package(game_storage 0.5 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -86,10 +86,12 @@ using namespace game_storage;
 
 Storage chest({{"label", "Chest"}});
 Storage bag;
-Item sword({{"type", "sword"}, {"durability", 100}});
+Item sword(Parameters{{"type", "sword"}, {"durability", 100}},
+           Parameters{{"quantity", 1}});
 
 chest.add(sword);
-chest.set_item_parameter(sword.id(), "durability", 80);
+chest.set_item_data_value(sword.id(), "durability", 80);
+chest.set_entry_property(sword.id(), "quantity", 2);
 auto snapshot = chest.items();
 auto result = chest.transfer_to(sword.id(), bag);
 auto removed = bag.extract(sword.id()); // optional<Item>
@@ -102,11 +104,17 @@ auto removed = bag.extract(sword.id()); // optional<Item>
   literals such as `25` become `int64_t`; use an explicitly checked conversion for
   unsigned application values. Use `value.as<T>()` to access a known type, or
   `std::get_if<T>(&value.data)` to inspect safely. A wrong `as<T>()` throws.
-- Each new `Item(parameters)` receives a nonzero `uint64_t` ID. Identity is stored
-  separately from the parameter dictionary and has no setter. A parameter named
-  `"id"` is ordinary application metadata and does not change `item.id()`.
-- Copying an item preserves its ID and deep-copies its parameters. To create
-  another instance of the same item type, construct `Item(existing.parameters())`.
+- Each entry has an `item_data` dictionary for the item's own data and a separate
+  `properties` dictionary for its state in a storage, such as `quantity`. Construct
+  it with `Item(item_data, entry_properties)`; the second argument defaults to an
+  empty dictionary. These dictionaries may contain nested values and can both be
+  changed. `quantity` is ordinary data for now; it does not trigger stacking or
+  partial extraction.
+- Each new `Item` receives a nonzero `uint64_t` ID. Identity is stored separately
+  from both dictionaries and has no setter. A key named `"id"` in either dictionary
+  is ordinary application metadata and does not change `item.id()`.
+- Copying an item preserves its ID and deep-copies both dictionaries. To create
+  another instance of the same item type, construct `Item(existing.item_data())`.
 - IDs are unique across new items within one linked library instance during a
   process/module lifetime. JSON snapshots preserve and restore them. They are not
   distributed or cross-module identifiers; loading separate snapshots with
@@ -117,11 +125,14 @@ auto removed = bag.extract(sword.id()); // optional<Item>
 - Items remain in insertion order. Removal preserves the order of remaining items;
   transfer appends to the destination. Lookup is linear, suitable for an initial
   small-to-medium game inventory core. There is no automatic stacking.
-- All parameter/item/list reads return independent snapshots, including nested
+- All item/list/parameter reads return independent snapshots, including nested
   arrays and dictionaries. Mutating a snapshot never changes storage. Use
-  `set_item_parameter` / `remove_item_parameter` for stored items and
-  `set_parameter` / `remove_parameter` for storage itself. An unattached `Item`
-  also exposes parameter setters.
+  `set_item_data_value` / `remove_item_data_value` and `set_entry_property` /
+  `remove_entry_property` to change a stored entry, or `set_parameter` /
+  `remove_parameter` for the storage itself. `Item::item_data_value` and
+  `Item::entry_property` read individual values. An unattached `Item` has matching
+  setters and removers. The original `Item::parameters` / `parameter` and
+  `Storage::set_item_parameter` names remain aliases for `item_data`.
 - Missing lookups return `std::nullopt`, distinct from a present `Value(nullptr)`.
   Parameter setters insert or replace. Removal returns false if the item or key
   is absent; setting a parameter on a missing item returns false.
@@ -135,14 +146,16 @@ auto removed = bag.extract(sword.id()); // optional<Item>
 | `add(item)` | `added` or `duplicate_id` |
 | `extract(id)` | Whole item or `std::nullopt` |
 | `items()` / `item(id)` | List snapshot / optional item snapshot |
-| `transfer_to(id, destination)` | `transferred`, `item_not_found`, `duplicate_id`, `same_storage` |
+| `transfer_to(id, destination)` | `transferred`, `item_not_found`, `duplicate_id`, `same_storage`; preserves both entry dictionaries |
 
-No operation interprets parameters such as `locked`, `weight`, or `capacity`.
+No operation interprets values such as `locked`, `weight`, `capacity`, or `quantity`.
 The game decides when to call them. Transfer to the same storage is always a
 `same_storage` no-op, including for an absent ID. A rejected transfer leaves both
 storages unchanged. The destination copy completes before source removal;
 allocation failures preserve the source. Extraction constructs the returned item
 before committing removal. These guarantees do not imply thread synchronization.
+Because transfer preserves entry properties, the game should change or remove any
+destination-specific property (for example, a slot number) when appropriate.
 
 ## Saving and loading JSON
 
@@ -161,8 +174,13 @@ restored.load_json(save_data);
 The format is versioned. A minimal snapshot looks like this:
 
 ```json
-{"version":1,"parameters":{"label":"Chest"},"items":[{"id":"42","parameters":{"type":"sword","durability":80}}]}
+{"version":2,"parameters":{"label":"Chest"},"items":[{"id":"42","item_data":{"type":"sword","durability":80},"properties":{"quantity":2}}]}
 ```
+
+`to_json()` writes version 2. `load_json()` also accepts version 1 snapshots. It
+migrates each old item's `parameters` into `item_data` and initializes its entry
+`properties` to `{}`. It does not infer that a legacy `quantity` key belonged to
+entry properties; games may move that key explicitly after loading if needed.
 
 IDs are decimal **strings**, so the full 64-bit range survives JavaScript JSON
 handling. The loader preserves item order, IDs, nested values, and the difference
@@ -259,7 +277,6 @@ For the graphical browser example, follow [the WebAssembly UI build](docs/ui.md#
 ## Validation
 
 The current implementation has core and UI behavior checks, run through
-CTest on Windows/MSVC and WebAssembly/Node. The graphical example was also checked
-on desktop and in a browser for PNG loading, horizontal dragging, vertical wheel
-scrolling, action menus, and table refresh after an action. Installed CMake packages
-were checked with UI-only and raylib consumers, as well as a core-only build.
+CTest on Windows/MSVC and WebAssembly/Node. The graphical example builds for both
+desktop and WebAssembly. Installed CMake packages were previously checked with
+UI-only and raylib consumers, as well as a core-only build.

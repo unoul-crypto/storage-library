@@ -49,14 +49,25 @@ bool valid_catalog(const std::vector<Action>& actions) {
 }
 } // namespace
 
-Item::Item(Parameters parameters) : id_(next_id()), parameters_(std::move(parameters)) {}
-std::optional<Value> Item::parameter(const std::string& key) const {
-    return lookup(parameters_, key);
+Item::Item(Parameters item_data, Parameters entry_properties)
+    : id_(next_id()), item_data_(std::move(item_data)), entry_properties_(std::move(entry_properties)) {}
+std::optional<Value> Item::item_data_value(const std::string& key) const {
+    return lookup(item_data_, key);
 }
-void Item::set_parameter(std::string key, Value value) {
-    parameters_.insert_or_assign(std::move(key), std::move(value));
+void Item::set_item_data_value(std::string key, Value value) {
+    item_data_.insert_or_assign(std::move(key), std::move(value));
 }
-bool Item::remove_parameter(const std::string& key) { return parameters_.erase(key) != 0; }
+bool Item::remove_item_data_value(const std::string& key) { return item_data_.erase(key) != 0; }
+std::optional<Value> Item::entry_property(const std::string& key) const {
+    return lookup(entry_properties_, key);
+}
+void Item::set_entry_property(std::string key, Value value) {
+    entry_properties_.insert_or_assign(std::move(key), std::move(value));
+}
+bool Item::remove_entry_property(const std::string& key) { return entry_properties_.erase(key) != 0; }
+std::optional<Value> Item::parameter(const std::string& key) const { return item_data_value(key); }
+void Item::set_parameter(std::string key, Value value) { set_item_data_value(std::move(key), std::move(value)); }
+bool Item::remove_parameter(const std::string& key) { return remove_item_data_value(key); }
 
 Storage::Storage(Parameters parameters) : parameters_(std::move(parameters)) {}
 std::vector<Item>::iterator Storage::find(ItemId id) {
@@ -110,23 +121,40 @@ void Storage::set_parameter(std::string key, Value value) {
 }
 bool Storage::remove_parameter(const std::string& key) { return parameters_.erase(key) != 0; }
 bool Storage::set_item_parameter(ItemId id, std::string key, Value value) {
-    const auto it = find(id);
-    if (it == items_.end()) return false;
-    it->set_parameter(std::move(key), std::move(value));
-    return true;
+    return set_item_data_value(id, std::move(key), std::move(value));
 }
 bool Storage::remove_item_parameter(ItemId id, const std::string& key) {
+    return remove_item_data_value(id, key);
+}
+bool Storage::set_item_data_value(ItemId id, std::string key, Value value) {
     const auto it = find(id);
-    return it != items_.end() && it->remove_parameter(key);
+    if (it == items_.end()) return false;
+    it->set_item_data_value(std::move(key), std::move(value));
+    return true;
+}
+bool Storage::remove_item_data_value(ItemId id, const std::string& key) {
+    const auto it = find(id);
+    return it != items_.end() && it->remove_item_data_value(key);
+}
+bool Storage::set_entry_property(ItemId id, std::string key, Value value) {
+    const auto it = find(id);
+    if (it == items_.end()) return false;
+    it->set_entry_property(std::move(key), std::move(value));
+    return true;
+}
+bool Storage::remove_entry_property(ItemId id, const std::string& key) {
+    const auto it = find(id);
+    return it != items_.end() && it->remove_entry_property(key);
 }
 std::string Storage::to_json() const {
     Value::Array entries;
     entries.reserve(items_.size());
     for (const auto& item : items_) {
         entries.emplace_back(Value::Object{{"id", std::to_string(item.id())},
-                                           {"parameters", item.parameters()}});
+                                           {"item_data", item.item_data()},
+                                           {"properties", item.entry_properties()}});
     }
-    return detail::encode_json_value(Value::Object{{"version", 1},
+    return detail::encode_json_value(Value::Object{{"version", 2},
                                                     {"parameters", parameters_},
                                                     {"items", std::move(entries)}});
 }
@@ -135,8 +163,9 @@ void Storage::load_json(std::string_view json) {
     const auto* object = std::get_if<Value::Object>(&root.data);
     if (!object || object->size() != 3 || object->count("version") != 1 ||
         object->count("parameters") != 1 || object->count("items") != 1 ||
-        object->at("version") != Value(1))
+        (object->at("version") != Value(1) && object->at("version") != Value(2)))
         throw std::invalid_argument("Unsupported storage JSON schema or version");
+    const bool legacy = object->at("version") == Value(1);
     const auto* loaded_parameters = std::get_if<Value::Object>(&object->at("parameters").data);
     const auto* entries = std::get_if<Value::Array>(&object->at("items").data);
     if (!loaded_parameters || !entries) throw std::invalid_argument("Invalid storage JSON fields");
@@ -147,20 +176,22 @@ void Storage::load_json(std::string_view json) {
     ItemId highest = 0;
     for (const auto& entry : *entries) {
         const auto* fields = std::get_if<Value::Object>(&entry.data);
-        if (!fields || fields->size() != 2 || fields->count("id") != 1 ||
-            fields->count("parameters") != 1)
+        if (!fields || fields->size() != (legacy ? 2u : 3u) || fields->count("id") != 1 ||
+            fields->count(legacy ? "parameters" : "item_data") != 1 ||
+            (!legacy && fields->count("properties") != 1))
             throw std::invalid_argument("Invalid item JSON fields");
         const auto* id_text = std::get_if<std::string>(&fields->at("id").data);
-        const auto* item_parameters = std::get_if<Value::Object>(&fields->at("parameters").data);
-        if (!id_text || !item_parameters || id_text->empty() ||
+        const auto* item_data = std::get_if<Value::Object>(&fields->at(legacy ? "parameters" : "item_data").data);
+        const auto* properties = legacy ? nullptr : std::get_if<Value::Object>(&fields->at("properties").data);
+        if (!id_text || !item_data || (!legacy && !properties) || id_text->empty() ||
             (id_text->size() > 1 && id_text->front() == '0'))
-            throw std::invalid_argument("Invalid item ID or parameters");
+            throw std::invalid_argument("Invalid item ID or data");
         ItemId id = 0;
         const auto parsed = std::from_chars(id_text->data(), id_text->data() + id_text->size(), id);
         if (parsed.ec != std::errc{} || parsed.ptr != id_text->data() + id_text->size() ||
             id == 0 || !ids.insert(id).second)
             throw std::invalid_argument("Invalid or duplicate item ID");
-        loaded_items.push_back(Item(id, *item_parameters));
+        loaded_items.push_back(Item(id, *item_data, legacy ? Parameters{} : *properties));
         highest = std::max(highest, id);
     }
     Parameters loaded_storage_parameters = *loaded_parameters;

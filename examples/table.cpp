@@ -24,16 +24,19 @@ struct Demo {
         chest.set_parameter("capacity", 40);
         bag.set_parameter("capacity", 20);
         for (int i = 0; i < 35; ++i) {
-            chest.add(Item({{"name", std::string(i % 2 ? "Moonstone" : "Health potion")},
+            chest.add(Item(Parameters{{"name", std::string(i % 2 ? "Moonstone" : "Health potion")},
                             {"kind", i % 2 ? "Gemstone" : "Consumable"}, {"value", 10 + i * 3},
-                            {"png", i % 2 ? "assets/gem.png" : "assets/potion.png"}}));
+                            {"png", i % 2 ? "assets/gem.png" : "assets/potion.png"}},
+                            Parameters{{"quantity", i % 4 + 1}}));
         }
         for (int i = 0; i < 12; ++i)
-            bag.add(Item({{"name", "Moonstone"}, {"kind", "Gemstone"}, {"value", 24 + i}, {"png", "assets/gem.png"}}));
+            bag.add(Item(Parameters{{"name", "Moonstone"}, {"kind", "Gemstone"},
+                                    {"value", 24 + i}, {"png", "assets/gem.png"}},
+                         Parameters{{"quantity", 1}}));
         auto provider = [](const Item&, const Storage&, const Context&) {
             return std::vector<Action>{
                 {{"inspect", true, {}}, [](Storage& storage, ItemId id, const Context&) {
-                    storage.set_item_parameter(id, "inspected", true);
+                    storage.set_item_data_value(id, "inspected", true);
                 }},
                 {{"sell", false, "Visit a merchant to sell"}, {}},
                 {{"discard", true, {}}, [](Storage& storage, ItemId id, const Context&) { storage.extract(id); }}
@@ -43,28 +46,34 @@ struct Demo {
         gui::TableConfig table;
         table.columns = {
             {"ITEM", 230, [](const Item& item, const Storage&, const Context&) {
-                return gui::Cell{item.parameter("name")->as<std::string>(), item.parameter("png")->as<std::string>()};
+                return gui::Cell{item.item_data_value("name")->as<std::string>(),
+                                 item.item_data_value("png")->as<std::string>()};
             }},
             {"CATEGORY", 170, [](const Item& item, const Storage&, const Context&) {
-                return gui::Cell{item.parameter("kind")->as<std::string>(), {}};
+                return gui::Cell{item.item_data_value("kind")->as<std::string>(), {}};
             }},
             {"VALUE", 100, [](const Item& item, const Storage&, const Context& context) {
                 const auto multiplier = context.at("price_multiplier").as<std::int64_t>();
-                return gui::Cell{std::to_string(item.parameter("value")->as<std::int64_t>() * multiplier) + " G", {}};
+                return gui::Cell{std::to_string(item.item_data_value("value")->as<std::int64_t>() * multiplier) + " G", {}};
+            }},
+            {"QTY", 75, [](const Item& item, const Storage&, const Context&) {
+                return gui::Cell{std::to_string(item.entry_property("quantity")->as<std::int64_t>()), {}};
             }},
             {"NOTES", 220, [](const Item& item, const Storage&, const Context&) {
-                return gui::Cell{item.parameter("inspected") ? "Inspected" : "Unknown properties", {}};
+                return gui::Cell{item.item_data_value("inspected") ? "Inspected" : "Unknown properties", {}};
             }}
         };
         table.order = [](std::vector<Item> items, const Context&) {
             std::stable_sort(items.begin(), items.end(), [](const Item& a, const Item& b) {
-                return a.parameter("name")->as<std::string>() < b.parameter("name")->as<std::string>();
+                return a.item_data_value("name")->as<std::string>() < b.item_data_value("name")->as<std::string>();
             });
             return items;
         };
         table.tooltip = [](const Item& item, const Storage&, const Context&) {
-            return gui::Tooltip{{item.parameter("name")->as<std::string>(), item.parameter("png")->as<std::string>()},
-                                {"A discovery from the old ruins.", {}}, {"Right-click for actions", {}}};
+            return gui::Tooltip{{item.item_data_value("name")->as<std::string>(),
+                                 item.item_data_value("png")->as<std::string>()},
+                                {"Quantity: " + std::to_string(item.entry_property("quantity")->as<std::int64_t>()), {}},
+                                {"Right-click for actions", {}}};
         };
         table.action_label = [](const ActionInfo& action, const Context&) {
             if (action.id == "inspect") return std::string("Inspect item");

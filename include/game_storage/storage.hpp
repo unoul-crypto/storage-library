@@ -47,20 +47,32 @@ using ItemId = std::uint64_t;
 class Item {
 public:
     // Copying preserves identity; constructing a new Item generates a new ID.
-    explicit Item(Parameters parameters = {});
-    Item(std::initializer_list<Parameters::value_type> parameters)
-        : Item(Parameters(parameters)) {}
+    // Both dictionaries are arbitrary data; the core does not interpret quantity.
+    explicit Item(Parameters item_data = {}, Parameters entry_properties = {});
+    Item(std::initializer_list<Parameters::value_type> item_data)
+        : Item(Parameters(item_data)) {}
     ItemId id() const noexcept { return id_; }
-    Parameters parameters() const { return parameters_; }
+    Parameters item_data() const { return item_data_; }
+    std::optional<Value> item_data_value(const std::string& key) const;
+    void set_item_data_value(std::string key, Value value);
+    bool remove_item_data_value(const std::string& key);
+    Parameters entry_properties() const { return entry_properties_; }
+    std::optional<Value> entry_property(const std::string& key) const;
+    void set_entry_property(std::string key, Value value);
+    bool remove_entry_property(const std::string& key);
+    // Compatibility names for item_data in the original API.
+    Parameters parameters() const { return item_data(); }
     std::optional<Value> parameter(const std::string& key) const;
     void set_parameter(std::string key, Value value);
     bool remove_parameter(const std::string& key);
 
 private:
     friend class Storage;
-    Item(ItemId id, Parameters parameters) : id_(id), parameters_(std::move(parameters)) {}
+    Item(ItemId id, Parameters item_data, Parameters entry_properties)
+        : id_(id), item_data_(std::move(item_data)), entry_properties_(std::move(entry_properties)) {}
     ItemId id_;
-    Parameters parameters_;
+    Parameters item_data_;
+    Parameters entry_properties_;
 };
 
 enum class AddResult { added, duplicate_id };
@@ -123,6 +135,11 @@ public:
     bool remove_parameter(const std::string& key);
     bool set_item_parameter(ItemId id, std::string key, Value value);
     bool remove_item_parameter(ItemId id, const std::string& key);
+    // Mutate the two independent dictionaries of a stored entry by its ID.
+    bool set_item_data_value(ItemId id, std::string key, Value value);
+    bool remove_item_data_value(ItemId id, const std::string& key);
+    bool set_entry_property(ItemId id, std::string key, Value value);
+    bool remove_entry_property(ItemId id, const std::string& key);
 
     // Versioned JSON snapshot; ID strings preserve the full uint64_t range.
     std::string to_json() const;
