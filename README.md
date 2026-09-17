@@ -74,7 +74,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.6 CONFIG REQUIRED)
+find_package(game_storage 0.7 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -150,22 +150,45 @@ are required. The game provides two callbacks:
 - Decoder: `T(const Parameters& item_data, const Parameters& properties)`.
   Validate the game's type/schema and construct an independent object.
 
-`adapter.to_item(value, properties)` creates a new entry with a new ID, starting
-with empty item data and the optional supplied properties. Add it with
-`storage.add(entry)`. `adapter.from_item(entry)` reconstructs the game object.
-`adapter.update(storage, id, value)` updates an existing entry while preserving
-its ID, position, and any keys the encoder leaves untouched. Missing IDs return
-false without calling the encoder. Both dictionaries are committed together;
-an encoder exception leaves the stored entry unchanged. Callbacks must not mutate
-the storage or reenter its operations; external callback side effects cannot be
-rolled back. Decoder exceptions propagate to the game.
+Register adapters under stable, application-owned saved type IDs. The registry
+writes that ID into the entry separately from its dictionaries, saves it in JSON,
+and selects the same adapter after loading:
 
-The class object and stored entry are independent; changes require an explicit
-`update`. Keep the entry ID separately in the game. JSON remains version 2 and
-contains the dictionaries; adapters and C++ type names are not serialized. For
-heterogeneous items, the game can store a stable type key and choose its adapter
-when reading. Loading JSON itself does not invoke adapters or validate game types.
-See [the complete custom-class example](examples/custom_item.cpp), including a
+```cpp
+ItemAdapterRegistry adapters;
+adapters.register_adapter<Sword>("my_game.sword", sword_adapter);
+
+ItemId id = adapters.add<Sword>(chest, Sword{"Iron sword", 100}, {{"quantity", 1}});
+Sword sword = adapters.get<Sword>(chest, id);
+sword.durability = 80;
+adapters.update<Sword>(chest, id, sword);
+```
+
+`add<T>` creates and inserts a new typed entry, then returns its ID. `get<T>` can
+read an `Item` snapshot or a storage/ID pair. It selects the adapter by the entry's
+saved type and verifies that it produces the requested C++ type. `update<T>` uses
+the same checks and preserves the ID, position, and keys the encoder leaves
+untouched. `contains`, `can_decode`, and `cpp_type` support inspection when the
+concrete type is chosen at runtime.
+
+Older saves have no adapter type. After the game identifies such an entry from its
+data, `adapters.bind<T>(storage, id)` assigns the registered saved type so later
+`get<T>` calls and version 3 saves use automatic selection.
+
+Saved type IDs must be nonempty and unique, and each C++ type can have one adapter
+per registry. Use stable names independent of compiler type names. Missing
+registrations, untyped entries, type mismatches, and malformed class data produce
+exceptions; a missing item passed to `update` returns false. Encoding operates on
+copies, so an encoder exception leaves the stored entry unchanged. Callbacks must
+not mutate the storage or reenter its operations; their external side effects
+cannot be rolled back.
+
+The class object and stored entry are independent; changes require `update`. Keep
+the entry ID in the game. Loading JSON does not invoke adapters, which lets saves
+load before optional game modules register their types. Direct `ItemAdapter<T>`
+methods remain available for unregistered or manually selected conversions; those
+items have an empty saved adapter type unless inserted through the registry. See
+[the complete custom-class example](examples/custom_item.cpp), including a
 save/load round trip. Build/run `storage_adapter_example` like `storage_example`.
 
 ## Technical operations
@@ -203,11 +226,12 @@ restored.load_json(save_data);
 The format is versioned. A minimal snapshot looks like this:
 
 ```json
-{"version":2,"parameters":{"label":"Chest"},"items":[{"id":"42","item_data":{"type":"sword","durability":80},"properties":{"quantity":2}}]}
+{"version":3,"parameters":{"label":"Chest"},"items":[{"id":"42","type":"my_game.sword","item_data":{"name":"Iron sword","durability":80},"properties":{"quantity":2}}]}
 ```
 
-`to_json()` writes version 2. `load_json()` also accepts version 1 snapshots. It
-migrates each old item's `parameters` into `item_data` and initializes its entry
+`to_json()` writes version 3. `load_json()` also accepts versions 1 and 2. Version
+2 entries receive an empty saved adapter type. For version 1, the loader migrates
+each old item's `parameters` into `item_data` and initializes its entry
 `properties` to `{}`. It does not infer that a legacy `quantity` key belonged to
 entry properties; games may move that key explicitly after loading if needed.
 

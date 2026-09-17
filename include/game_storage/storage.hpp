@@ -43,6 +43,7 @@ struct Value {
 using Parameters = Value::Object;
 using Context = Parameters;
 using ItemId = std::uint64_t;
+class ItemAdapterRegistry;
 
 class Item {
 public:
@@ -52,6 +53,7 @@ public:
     Item(std::initializer_list<Parameters::value_type> item_data)
         : Item(Parameters(item_data)) {}
     ItemId id() const noexcept { return id_; }
+    const std::string& adapter_type() const noexcept { return adapter_type_; }
     Parameters item_data() const { return item_data_; }
     std::optional<Value> item_data_value(const std::string& key) const;
     void set_item_data_value(std::string key, Value value);
@@ -68,9 +70,12 @@ public:
 
 private:
     friend class Storage;
-    Item(ItemId id, Parameters item_data, Parameters entry_properties)
-        : id_(id), item_data_(std::move(item_data)), entry_properties_(std::move(entry_properties)) {}
+    friend class ItemAdapterRegistry;
+    Item(ItemId id, Parameters item_data, Parameters entry_properties, std::string adapter_type = {})
+        : id_(id), adapter_type_(std::move(adapter_type)), item_data_(std::move(item_data)),
+          entry_properties_(std::move(entry_properties)) {}
     ItemId id_;
+    std::string adapter_type_;
     Parameters item_data_;
     Parameters entry_properties_;
 };
@@ -140,6 +145,7 @@ public:
     bool remove_item_data_value(ItemId id, const std::string& key);
     bool set_entry_property(ItemId id, std::string key, Value value);
     bool remove_entry_property(ItemId id, const std::string& key);
+    bool set_item_adapter_type(ItemId id, std::string saved_type);
     // Atomically replaces both dictionaries, preserving the entry ID and order.
     bool replace_item_content(ItemId id, Parameters item_data, Parameters entry_properties);
 

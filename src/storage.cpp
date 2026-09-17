@@ -146,6 +146,12 @@ bool Storage::remove_entry_property(ItemId id, const std::string& key) {
     const auto it = find(id);
     return it != items_.end() && it->remove_entry_property(key);
 }
+bool Storage::set_item_adapter_type(ItemId id, std::string saved_type) {
+    const auto it = find(id);
+    if (it == items_.end()) return false;
+    it->adapter_type_.swap(saved_type);
+    return true;
+}
 bool Storage::replace_item_content(ItemId id, Parameters item_data, Parameters entry_properties) {
     const auto it = find(id);
     if (it == items_.end()) return false;
@@ -158,10 +164,11 @@ std::string Storage::to_json() const {
     entries.reserve(items_.size());
     for (const auto& item : items_) {
         entries.emplace_back(Value::Object{{"id", std::to_string(item.id())},
+                                           {"type", item.adapter_type()},
                                            {"item_data", item.item_data()},
                                            {"properties", item.entry_properties()}});
     }
-    return detail::encode_json_value(Value::Object{{"version", 2},
+    return detail::encode_json_value(Value::Object{{"version", 3},
                                                     {"parameters", parameters_},
                                                     {"items", std::move(entries)}});
 }
@@ -170,9 +177,11 @@ void Storage::load_json(std::string_view json) {
     const auto* object = std::get_if<Value::Object>(&root.data);
     if (!object || object->size() != 3 || object->count("version") != 1 ||
         object->count("parameters") != 1 || object->count("items") != 1 ||
-        (object->at("version") != Value(1) && object->at("version") != Value(2)))
+        (object->at("version") != Value(1) && object->at("version") != Value(2) &&
+         object->at("version") != Value(3)))
         throw std::invalid_argument("Unsupported storage JSON schema or version");
-    const bool legacy = object->at("version") == Value(1);
+    const auto version = object->at("version").as<std::int64_t>();
+    const bool legacy = version == 1;
     const auto* loaded_parameters = std::get_if<Value::Object>(&object->at("parameters").data);
     const auto* entries = std::get_if<Value::Array>(&object->at("items").data);
     if (!loaded_parameters || !entries) throw std::invalid_argument("Invalid storage JSON fields");
@@ -183,14 +192,17 @@ void Storage::load_json(std::string_view json) {
     ItemId highest = 0;
     for (const auto& entry : *entries) {
         const auto* fields = std::get_if<Value::Object>(&entry.data);
-        if (!fields || fields->size() != (legacy ? 2u : 3u) || fields->count("id") != 1 ||
+        const std::size_t expected_fields = version == 1 ? 2u : (version == 2 ? 3u : 4u);
+        if (!fields || fields->size() != expected_fields || fields->count("id") != 1 ||
             fields->count(legacy ? "parameters" : "item_data") != 1 ||
-            (!legacy && fields->count("properties") != 1))
+            (!legacy && fields->count("properties") != 1) ||
+            (version == 3 && fields->count("type") != 1))
             throw std::invalid_argument("Invalid item JSON fields");
         const auto* id_text = std::get_if<std::string>(&fields->at("id").data);
         const auto* item_data = std::get_if<Value::Object>(&fields->at(legacy ? "parameters" : "item_data").data);
         const auto* properties = legacy ? nullptr : std::get_if<Value::Object>(&fields->at("properties").data);
-        if (!id_text || !item_data || (!legacy && !properties) || id_text->empty() ||
+        const auto* adapter_type = version == 3 ? std::get_if<std::string>(&fields->at("type").data) : nullptr;
+        if (!id_text || !item_data || (!legacy && !properties) || (version == 3 && !adapter_type) || id_text->empty() ||
             (id_text->size() > 1 && id_text->front() == '0'))
             throw std::invalid_argument("Invalid item ID or data");
         ItemId id = 0;
@@ -198,7 +210,8 @@ void Storage::load_json(std::string_view json) {
         if (parsed.ec != std::errc{} || parsed.ptr != id_text->data() + id_text->size() ||
             id == 0 || !ids.insert(id).second)
             throw std::invalid_argument("Invalid or duplicate item ID");
-        loaded_items.push_back(Item(id, *item_data, legacy ? Parameters{} : *properties));
+        loaded_items.push_back(Item(id, *item_data, legacy ? Parameters{} : *properties,
+                                    version == 3 ? *adapter_type : std::string{}));
         highest = std::max(highest, id);
     }
     Parameters loaded_storage_parameters = *loaded_parameters;

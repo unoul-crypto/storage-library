@@ -47,6 +47,56 @@ int main() {
         threw = false;
         try { ItemAdapter<int> invalid({}, {}); } catch (const std::invalid_argument&) { threw = true; }
         check(threw);
+
+        ItemAdapterRegistry registry;
+        fail = false;
+        registry.register_adapter<std::unique_ptr<int>>("example.integer", adapter);
+        Storage typed_storage;
+        const auto typed_id = registry.add<std::unique_ptr<int>>(
+            typed_storage, std::make_unique<int>(41), {{"quantity", 2}});
+        check(typed_storage.item(typed_id)->adapter_type() == "example.integer");
+        check(registry.contains("example.integer") && registry.can_decode(*typed_storage.item(typed_id)));
+        check(registry.cpp_type(*typed_storage.item(typed_id)) == typeid(std::unique_ptr<int>));
+        check(*registry.get<std::unique_ptr<int>>(typed_storage, typed_id) == 41);
+        check(registry.update(typed_storage, typed_id, std::make_unique<int>(42)));
+        check(*registry.get<std::unique_ptr<int>>(*typed_storage.item(typed_id)) == 42);
+
+        Storage typed_restored;
+        typed_restored.load_json(typed_storage.to_json());
+        check(typed_restored.item(typed_id)->adapter_type() == "example.integer");
+        check(*registry.get<std::unique_ptr<int>>(typed_restored, typed_id) == 42);
+
+        threw = false;
+        try { registry.get<int>(*typed_restored.item(typed_id)); }
+        catch (const std::invalid_argument&) { threw = true; }
+        check(threw);
+        threw = false;
+        try { registry.get<std::unique_ptr<int>>(Item()); }
+        catch (const std::invalid_argument&) { threw = true; }
+        check(threw);
+        ItemAdapterRegistry empty_registry;
+        check(!empty_registry.can_decode(*typed_restored.item(typed_id)));
+        threw = false;
+        try { empty_registry.get<std::unique_ptr<int>>(*typed_restored.item(typed_id)); }
+        catch (const std::out_of_range&) { threw = true; }
+        check(threw);
+        Storage legacy;
+        const auto legacy_item = adapter.to_item(std::make_unique<int>(7));
+        legacy.add(legacy_item);
+        check(!registry.can_decode(*legacy.item(legacy_item.id())));
+        check(registry.bind<std::unique_ptr<int>>(legacy, legacy_item.id()));
+        check(*registry.get<std::unique_ptr<int>>(legacy, legacy_item.id()) == 7);
+        check(!registry.bind<std::unique_ptr<int>>(legacy, 0));
+        threw = false;
+        try { registry.register_adapter<std::unique_ptr<int>>("other.integer", adapter); }
+        catch (const std::invalid_argument&) { threw = true; }
+        check(threw);
+        threw = false;
+        try { registry.register_adapter<int>("example.integer", ItemAdapter<int>{
+            [](const int&, Parameters&, Parameters&) {},
+            [](const Parameters&, const Parameters&) { return 0; }}); }
+        catch (const std::invalid_argument&) { threw = true; }
+        check(threw);
         std::cout << "Adapter checks passed\n";
     } catch (const std::exception& error) {
         std::cerr << error.what() << '\n';

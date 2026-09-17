@@ -219,7 +219,7 @@ void json_snapshots() {
     original.add(first);
     original.add(second);
     const auto json = original.to_json();
-    check(json.find("\"version\":2") != std::string::npos, "Snapshot declares version 2");
+    check(json.find("\"version\":3") != std::string::npos, "Snapshot declares version 3");
     check(json.find("\"item_data\":") != std::string::npos &&
           json.find("\"properties\":") != std::string::npos,
           "Snapshot stores item data and entry properties separately");
@@ -247,7 +247,9 @@ void json_snapshots() {
 
     const auto before = restored.to_json();
     const std::vector<std::string> invalid = {
-        "", "{", "[]", json + " trailing", "{\"version\":3,\"parameters\":{},\"items\":[]}",
+        "", "{", "[]", json + " trailing", "{\"version\":4,\"parameters\":{},\"items\":[]}",
+        "{\"version\":3,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":{}}]}",
+        "{\"version\":3,\"parameters\":{},\"items\":[{\"id\":\"1\",\"type\":null,\"item_data\":{},\"properties\":{}}]}",
         "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{}}]}",
         "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":null}]}",
         "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":{},\"parameters\":{}}]}",
@@ -292,8 +294,14 @@ void json_snapshots() {
     check(migrated.item(42)->item_data_value("quantity") == std::optional<Value>{5} &&
           migrated.item(42)->entry_properties().empty(),
           "Version 1 item parameters migrate wholly to item_data");
-    check(migrated.to_json().find("\"version\":2") != std::string::npos,
-          "Loaded version 1 data is saved as version 2");
+    check(migrated.to_json().find("\"version\":3") != std::string::npos,
+          "Loaded version 1 data is saved as version 3");
+
+    Storage version_two;
+    version_two.load_json("{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"43\",\"item_data\":{\"type\":\"potion\"},\"properties\":{\"quantity\":4}}]}");
+    check(version_two.item(43)->adapter_type().empty() &&
+          version_two.item(43)->entry_property("quantity") == std::optional<Value>{4},
+          "Version 2 loads with an empty saved adapter type");
 
     Storage with_properties;
     Item stack(Parameters{{"type", "potion"}}, Parameters{{"quantity", 7}});
@@ -301,7 +309,7 @@ void json_snapshots() {
     Storage round_trip;
     round_trip.load_json(with_properties.to_json());
     check(round_trip.item(stack.id())->entry_property("quantity") == std::optional<Value>{7},
-          "Version 2 entry properties survive JSON round-trip");
+          "Entry properties survive version 3 JSON round-trip");
 }
 } // namespace
 
