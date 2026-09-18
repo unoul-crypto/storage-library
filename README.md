@@ -6,6 +6,7 @@ interface. Developers own game rules, item presentation, ordering, and actions.
 | Module / CMake target | What it provides |
 | --- | --- |
 | `game_storage::game_storage` | Items, parameters, extraction, transfers, and actions; no graphics dependencies |
+| `game_storage::stacks` | Optional quantity, splitting, partial transfer, and merging rules; core dependency only |
 | `game_storage::ui` | Table layout, scrolling, selection, tooltips, and menus; no rendering API |
 | `game_storage::raylib` | Optional raylib drawing, PNG loading, and input adapter |
 
@@ -20,11 +21,14 @@ one shared footer below both tables. The game supplies drawing and input behavio
 
 - [UI setup, customization, and graphical demo](docs/ui.md)
 - [Core usage example](examples/basic.cpp)
+- [Optional stack operations](docs/stacks.md)
 - [Two-storage UI example](examples/table.cpp)
-- [Core API](include/game_storage/storage.hpp) and [UI API](include/game_storage/ui.hpp)
+- [Core API](include/game_storage/storage.hpp), [stack API](include/game_storage/stacks.hpp),
+  and [UI API](include/game_storage/ui.hpp)
 
-Item slots, stacks, partial extraction, and drag-and-drop transfers are not implemented
-in this version. Storage data can be saved and restored through versioned JSON.
+Item slots and drag-and-drop transfers are not implemented in this version. Stack
+operations are an optional logic module. Storage data can be saved and restored
+through versioned JSON.
 
 ## Build and test
 
@@ -44,13 +48,14 @@ CMake version requested by that checkout (3.25+ for the tested raylib 6.0 checko
 | CMake option | Default | Purpose |
 | --- | --- | --- |
 | `GAME_STORAGE_BUILD_UI` | `ON` | Build renderer-independent UI behavior |
+| `GAME_STORAGE_BUILD_STACKS` | `ON` | Build optional stack operations |
 | `GAME_STORAGE_BUILD_RAYLIB` | `OFF` | Build the renderer; requires UI and raylib |
 | `GAME_STORAGE_RAYLIB_SOURCE_DIR` | Empty | Use an existing raylib source directory instead of finding an installed package |
 | `GAME_STORAGE_BUILD_TESTS` | `ON` for standalone builds | Build core and enabled UI tests |
 | `GAME_STORAGE_BUILD_EXAMPLES` | `ON` for standalone builds | Build the core example and, if enabled, the graphical example |
 
-For the core alone, configure with both `-DGAME_STORAGE_BUILD_UI=OFF` and
-`-DGAME_STORAGE_BUILD_RAYLIB=OFF`. No dependencies are downloaded automatically.
+For the core alone, also set `-DGAME_STORAGE_BUILD_STACKS=OFF`, alongside both UI
+options. No dependencies are downloaded automatically.
 
 On Windows, if CMake is not on PATH, set a PowerShell variable to its executable
 and replace `cmake` with `& $cmake` (and use `ctest.exe` from the same directory).
@@ -74,7 +79,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.7 CONFIG REQUIRED)
+find_package(game_storage 0.8 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -329,7 +334,8 @@ For the graphical browser example, follow [the WebAssembly UI build](docs/ui.md#
 
 ## Validation
 
-The current implementation has core and UI behavior checks, run through
-CTest on Windows/MSVC and WebAssembly/Node. The graphical example builds for both
-desktop and WebAssembly. Installed CMake packages were previously checked with
-UI-only and raylib consumers, as well as a core-only build.
+The current implementation has core, adapter, stack, and UI behavior checks, run
+through CTest on Windows/MSVC and WebAssembly/Node. The graphical example builds
+for both desktop and WebAssembly. Installed CMake packages were checked with a
+stack component consumer; core-only, UI-only, and raylib configurations are also
+covered by build checks.

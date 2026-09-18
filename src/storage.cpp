@@ -51,6 +51,11 @@ bool valid_catalog(const std::vector<Action>& actions) {
 
 Item::Item(Parameters item_data, Parameters entry_properties)
     : id_(next_id()), item_data_(std::move(item_data)), entry_properties_(std::move(entry_properties)) {}
+Item Item::new_instance() const {
+    Item result(item_data_, entry_properties_);
+    result.adapter_type_ = adapter_type_;
+    return result;
+}
 std::optional<Value> Item::item_data_value(const std::string& key) const {
     return lookup(item_data_, key);
 }

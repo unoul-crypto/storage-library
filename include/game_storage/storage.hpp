@@ -53,6 +53,7 @@ public:
     Item(std::initializer_list<Parameters::value_type> item_data)
         : Item(Parameters(item_data)) {}
     ItemId id() const noexcept { return id_; }
+    Item new_instance() const; // Copies content and adapter type, but generates a new ID.
     const std::string& adapter_type() const noexcept { return adapter_type_; }
     Parameters item_data() const { return item_data_; }
     std::optional<Value> item_data_value(const std::string& key) const;
