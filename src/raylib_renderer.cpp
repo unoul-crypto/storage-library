@@ -87,7 +87,8 @@ Input RaylibRenderer::poll_input() {
             IsMouseButtonPressed(MOUSE_BUTTON_LEFT), IsMouseButtonDown(MOUSE_BUTTON_LEFT),
             IsMouseButtonPressed(MOUSE_BUTTON_RIGHT), IsKeyPressed(KEY_ESCAPE),
             IsKeyDown(KEY_LEFT_CONTROL) || IsKeyDown(KEY_RIGHT_CONTROL),
-            IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT)};
+            IsKeyDown(KEY_LEFT_SHIFT) || IsKeyDown(KEY_RIGHT_SHIFT),
+            IsMouseButtonReleased(MOUSE_BUTTON_LEFT), IsKeyPressed(KEY_ENTER)};
 }
 void RaylibRenderer::custom(std::optional<std::size_t> panel, Rect bounds) {
     if (bounds.height <= 0) return;
@@ -153,6 +154,29 @@ void RaylibRenderer::draw(const Frame& frame, Point mouse) {
         if (menu.more_above) fill({menu.bounds.x, menu.bounds.y, menu.bounds.width, 3}, theme_.accent);
         if (menu.more_below) fill({menu.bounds.x, menu.bounds.y + menu.bounds.height - 3, menu.bounds.width, 3}, theme_.accent);
         outline(menu.bounds, theme_.accent);
+    }
+    if (frame.drag) {
+        const auto& drag = *frame.drag;
+        if (drag.destination_panel) outline(frame.panels[*drag.destination_panel].body, theme_.accent);
+        const std::string label = std::to_string(drag.items.size()) + " item(s)";
+        const Rect badge{drag.pointer.x + 14, drag.pointer.y + 14, 130, 30};
+        fill(badge, theme_.popup); outline(badge, theme_.accent);
+        cell({label, {}}, badge, badge, theme_.text);
+    }
+    if (frame.quantity) {
+        const auto& q = *frame.quantity;
+        fill(q.bounds, theme_.popup); outline(q.bounds, theme_.accent);
+        cell({"Quantity: " + std::to_string(q.value) + " / " + std::to_string(q.maximum), {}},
+             {q.bounds.x + 12, q.bounds.y + 8, q.bounds.width - 24, 32}, q.bounds, theme_.text);
+        fill(q.track, theme_.track); fill(q.thumb, theme_.accent);
+        for (const auto& button : {q.minus, q.plus, q.confirm, q.cancel}) {
+            fill(button, button.contains(mouse) ? theme_.hover : theme_.header);
+            outline(button, theme_.border);
+        }
+        cell({"-", {}}, q.minus, q.minus, theme_.text);
+        cell({"+", {}}, q.plus, q.plus, theme_.text);
+        cell({"Move", {}}, q.confirm, q.confirm, theme_.text);
+        cell({"Cancel", {}}, q.cancel, q.cancel, theme_.text);
     }
 }
 } // namespace game_storage::ui

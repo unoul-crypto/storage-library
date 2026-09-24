@@ -48,7 +48,8 @@ void View::set_panels(std::vector<Panel> panels) {
     }
     panels_ = std::move(panels);
     states_.assign(panels_.size(), {});
-    hover_.reset(); menu_.reset(); drag_.reset(); last_action_.reset(); last_actions_.clear();
+    hover_.reset(); menu_.reset(); drag_.reset(); item_drag_.reset(); pending_quantity_.reset();
+    last_action_.reset(); last_actions_.clear(); last_drop_.reset();
     hover_time_ = 0; menu_offset_ = 0; frame_ = {};
 }
 void View::set_shared_footer_height(float height) {
@@ -173,10 +174,60 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
                     input.seconds, input.wheel_x, input.wheel_y})
         if (!std::isfinite(v)) throw std::invalid_argument("UI input must be finite");
     bounds.width = std::max(0.0f, bounds.width); bounds.height = std::max(0.0f, bounds.height);
-    frame_.tooltip.reset(); last_action_.reset(); last_actions_.clear();
-    frame_.captures_pointer = (!panels_.empty() && bounds.contains(input.mouse)) || menu_.has_value() || drag_.has_value();
+    frame_.tooltip.reset(); frame_.drag.reset(); frame_.quantity.reset();
+    last_action_.reset(); last_actions_.clear(); last_drop_.reset();
+    frame_.captures_pointer = (!panels_.empty() && bounds.contains(input.mouse)) || menu_.has_value() ||
+                              drag_.has_value() || item_drag_.has_value() || pending_quantity_.has_value();
     layout(bounds, context);
-    if (input.escape) { menu_.reset(); hover_.reset(); hover_time_ = 0; drag_.reset(); }
+    if (input.escape) {
+        menu_.reset(); hover_.reset(); hover_time_ = 0; drag_.reset();
+        item_drag_.reset(); pending_quantity_.reset();
+    }
+    if (pending_quantity_) {
+        auto& pending = *pending_quantity_;
+        const Rect box = popup(bounds, {bounds.x + (bounds.width - 300) / 2,
+                                         bounds.y + (bounds.height - 140) / 2}, 300, 140);
+        QuantityFrame q;
+        q.bounds = box;
+        q.minus = {box.x + 12, box.y + 48, 32, 32};
+        q.plus = {box.x + box.width - 44, box.y + 48, 32, 32};
+        q.track = {q.minus.x + q.minus.width + 12, box.y + 58,
+                   std::max(0.0f, q.plus.x - q.minus.x - q.minus.width - 24), 12};
+        q.confirm = {box.x + 12, box.y + box.height - 44, (box.width - 36) / 2, 32};
+        q.cancel = {q.confirm.x + q.confirm.width + 12, q.confirm.y, q.confirm.width, 32};
+        if (input.left_pressed) {
+            if (q.minus.contains(input.mouse)) pending.value = std::max<std::int64_t>(1, pending.value - 1);
+            else if (q.plus.contains(input.mouse)) pending.value = std::min(pending.maximum, pending.value + 1);
+            else if (q.track.contains(input.mouse)) pending.sliding = true;
+            else if (q.confirm.contains(input.mouse)) {
+                pending.drop.quantity = pending.value;
+                last_drop_ = std::move(pending.drop);
+                pending_quantity_.reset();
+                return frame_;
+            } else if (q.cancel.contains(input.mouse)) {
+                pending_quantity_.reset();
+                return frame_;
+            }
+        }
+        if (input.enter) {
+            pending.drop.quantity = pending.value;
+            last_drop_ = std::move(pending.drop);
+            pending_quantity_.reset();
+            return frame_;
+        }
+        if (!input.left_down) pending.sliding = false;
+        if (pending.sliding && q.track.width > 0) {
+            const auto ratio = std::clamp((input.mouse.x - q.track.x) / q.track.width, 0.0f, 1.0f);
+            pending.value = 1 + static_cast<std::int64_t>(static_cast<long double>(pending.maximum - 1) * ratio);
+        }
+        q.value = pending.value; q.maximum = pending.maximum;
+        q.thumb = {q.track.x + (q.track.width - 12) * static_cast<float>(pending.value - 1) /
+                       static_cast<float>(std::max<std::int64_t>(1, pending.maximum - 1)),
+                   q.track.y - 4, 12, 20};
+        frame_.quantity = q;
+        frame_.captures_pointer = true;
+        return frame_;
+    }
     layout_menu(bounds, context);
     if (menu_ && frame_.menu) {
         hover_.reset(); hover_time_ = 0;
@@ -246,7 +297,7 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
     }
     layout(bounds, context);
     std::optional<Target> hit;
-    if (!drag_ && !input.escape) for (std::size_t p = 0; p < frame_.panels.size(); ++p) {
+    if (!drag_ && !item_drag_ && !input.escape) for (std::size_t p = 0; p < frame_.panels.size(); ++p) {
         auto& f = frame_.panels[p];
         if (!f.body.contains(input.mouse)) continue;
         for (const auto& row : f.rows) if (row.bounds.contains(input.mouse)) {
@@ -269,13 +320,15 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
                     } else state.anchor = row.id;
                 } else if (input.ctrl) {
                     state.selected.insert(row.id); state.anchor = row.id;
-                } else {
+                } else if (!(input.left_down && state.selected.count(row.id) && state.selected.size() > 1)) {
                     state.selected.clear(); state.selected.insert(row.id); state.anchor = row.id;
                 }
                 state.primary = row.id;
                 f.selected = row.id;
                 f.selected_ids.clear();
                 for (ItemId id : state.order) if (state.selected.count(id)) f.selected_ids.push_back(id);
+                if (input.left_pressed && input.left_down)
+                    item_drag_ = ItemDrag{p, input.mouse, f.selected_ids, false};
             }
             break;
         }
@@ -284,6 +337,42 @@ const Frame& View::update(Rect bounds, const Input& input, const Context& contex
         input.wheel_y != 0 || input.wheel_x != 0) hover_time_ = 0;
     else hover_time_ += std::max(0.0f, input.seconds);
     hover_ = hit;
+    if (item_drag_) {
+        auto& dragging = *item_drag_;
+        const float dx = input.mouse.x - dragging.origin.x, dy = input.mouse.y - dragging.origin.y;
+        if (input.left_down && dx * dx + dy * dy >= 36) dragging.active = true;
+        if (dragging.active) {
+            DragFrame visual{dragging.panel, dragging.items, input.mouse, {}, {}};
+            for (std::size_t p = 0; p < frame_.panels.size(); ++p) {
+                if (!frame_.panels[p].body.contains(input.mouse)) continue;
+                visual.destination_panel = p;
+                for (const auto& row : frame_.panels[p].rows)
+                    if (row.bounds.contains(input.mouse)) { visual.target_item = row.id; break; }
+                break;
+            }
+            frame_.drag = visual;
+            frame_.tooltip.reset(); hover_time_ = 0;
+            if (input.left_released || !input.left_down) {
+                if (visual.destination_panel && *visual.destination_panel != dragging.panel &&
+                    !dragging.items.empty()) {
+                    DropEvent drop{dragging.panel, *visual.destination_panel, dragging.items,
+                                   visual.target_item, {}};
+                    if (drop.items.size() == 1 && panels_[dragging.panel].table.drag_quantity) {
+                        const auto item = panels_[dragging.panel].storage->item(drop.items.front());
+                        if (item) {
+                            const auto maximum = panels_[dragging.panel].table.drag_quantity(
+                                *item, *panels_[dragging.panel].storage, context);
+                            if (maximum > 1) pending_quantity_ = PendingQuantity{std::move(drop), maximum, maximum};
+                            else last_drop_ = std::move(drop);
+                        }
+                    } else last_drop_ = std::move(drop);
+                }
+                frame_.drag.reset(); item_drag_.reset();
+            }
+            return frame_;
+        }
+        if (input.left_released || !input.left_down) item_drag_.reset();
+    }
     if (hit && input.right_pressed) {
         menu_ = hit; menu_anchor_ = input.mouse; menu_offset_ = 0;
         hover_time_ = 0; layout_menu(bounds, context);

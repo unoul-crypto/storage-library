@@ -1,0 +1,42 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get raylib 6.0
+        shell: pwsh
+        run: git clone --depth 1 --branch 6.0 https://github.com/raysan5/raylib.git raylib
+      - name: Configure
+        shell: pwsh
+        run: cmake -S . -B build/ci-desktop -G "Visual Studio 17 2022" -A x64 -DGAME_STORAGE_BUILD_RAYLIB=ON -DGAME_STORAGE_RAYLIB_SOURCE_DIR="$PWD/raylib"
+      - name: Build
+        run: cmake --build build/ci-desktop --config Release --parallel 4
+      - name: Test
+        run: ctest --test-dir build/ci-desktop -C Release --output-on-failure
+
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Get raylib 6.0 and Emscripten
+        run: |
+          git clone --depth 1 --branch 6.0 https://github.com/raysan5/raylib.git raylib
+          git clone --depth 1 https://github.com/emscripten-core/emsdk.git emsdk
+          ./emsdk/emsdk install 4.0.17
+          ./emsdk/emsdk activate 4.0.17
+      - name: Configure, build, and test WebAssembly
+        shell: bash
+        run: |
+          source ./emsdk/emsdk_env.sh
+          emcmake cmake -S . -B build/ci-wasm -G Ninja -DCMAKE_BUILD_TYPE=Release -DPLATFORM=Web -DGAME_STORAGE_BUILD_RAYLIB=ON -DGAME_STORAGE_RAYLIB_SOURCE_DIR="$PWD/raylib"
+          cmake --build build/ci-wasm --parallel 4
+          ctest --test-dir build/ci-wasm --output-on-failure

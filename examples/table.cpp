@@ -1,4 +1,5 @@
 #include <game_storage/raylib_renderer.hpp>
+#include <game_storage/stacks.hpp>
 #include <algorithm>
 #include <memory>
 #include <string>
@@ -17,6 +18,10 @@ struct Demo {
     Storage chest, bag;
     gui::View view;
     gui::RaylibRenderer renderer;
+    StackOperations stacks{StackConfig{
+        [](const Item& a, const Item& b) {
+            return a.adapter_type() == b.adapter_type() && a.item_data() == b.item_data();
+        }, "quantity", [](const Item&) { return std::int64_t{10}; }}};
     bool smoke = false;
     int frames = 0;
 
@@ -80,6 +85,10 @@ struct Demo {
             if (action.id == "sell") return std::string("Sell to merchant");
             return std::string("Discard item");
         };
+        table.drag_quantity = [this](const Item& item, const Storage&, const Context&) {
+            const auto result = stacks.quantity(item);
+            return result.status == StackStatus::success ? result.value : std::int64_t{1};
+        };
         view.set_panels({{&chest, "01 / CHEST", table, 55}, {&bag, "02 / BACKPACK", table, 55}});
         view.set_shared_footer_height(54);
         renderer.set_custom_drawer([this](std::optional<std::size_t> panel, gui::Rect area) {
@@ -121,6 +130,22 @@ struct Demo {
                              static_cast<float>(GetScreenHeight()) - 170};
         const Context context{{"price_multiplier", 2}};
         const auto& frame = view.update(area, input, context);
+        if (view.last_drop()) {
+            const auto drop = *view.last_drop();
+            Storage& source = drop.source_panel == 0 ? chest : bag;
+            Storage& destination = drop.destination_panel == 0 ? chest : bag;
+            const auto capacity = destination.parameter("capacity")->as<std::int64_t>();
+            for (ItemId id : drop.items) {
+                if (static_cast<std::int64_t>(destination.size()) >= capacity) break;
+                const auto count = stacks.quantity(source, id);
+                if (count.status != StackStatus::success) continue;
+                const auto amount = drop.quantity.value_or(count.value);
+                const auto moved = stacks.transfer_quantity_to(source, id, amount, destination);
+                if (moved.status == StackStatus::success && drop.target_item &&
+                    destination.contains(*drop.target_item))
+                    stacks.merge(destination, moved.item_id, destination, *drop.target_item);
+            }
+        }
         if (input.left_pressed && frame.shared_footer.contains(input.mouse) &&
             move_button(frame.shared_footer).contains(input.mouse)) {
             const auto capacity = bag.parameter("capacity")->as<std::int64_t>();
@@ -135,7 +160,7 @@ struct Demo {
         DrawText("STORAGE / EXPLORER", 24, 24, 28, {230, 237, 244, 255});
         DrawText("Two storages. Your data, presentation and actions.", 24, 66, 18, {151, 168, 188, 255});
         renderer.draw(frame, input.mouse);
-        DrawText("Wheel: rows  /  Drag: columns  /  Ctrl: add  /  Shift: range  /  Right-click: actions", 24,
+        DrawText("Wheel: rows  /  Drag rows: move  /  Ctrl: add  /  Shift: range  /  Right-click: actions", 24,
                  GetScreenHeight() - 32, 16, {151, 168, 188, 255});
         EndDrawing();
         ++frames;

@@ -6,8 +6,8 @@ interface. Developers own game rules, item presentation, ordering, and actions.
 | Module / CMake target | What it provides |
 | --- | --- |
 | `game_storage::game_storage` | Items, parameters, extraction, transfers, and actions; no graphics dependencies |
-| `game_storage::stacks` | Optional quantity, splitting, partial transfer, and merging rules; core dependency only |
-| `game_storage::ui` | Table layout, scrolling, selection, tooltips, and menus; no rendering API |
+| `game_storage::stacks` | Optional quantity, splitting, partial transfer, merging, and stack limits; core dependency only |
+| `game_storage::ui` | Table layout, scrolling, selection, drag-and-drop events, quantity picker, tooltips, and menus; no rendering API |
 | `game_storage::raylib` | Optional raylib drawing, PNG loading, and input adapter |
 
 The interface supports text and PNG cells, computed values from external context,
@@ -16,6 +16,8 @@ two tables with independent horizontal and vertical scrolling. Normal mouse-whee
 input scrolls vertically. Ctrl adds items to selection; Shift adds a sorted range.
 Actions apply to every selected item where the game permits them. Game rules and
 transfers remain under developer control.
+Dragging selected rows to the other table emits a drop event. A single dragged
+stack can open a quantity picker; the game decides whether and how to transfer it.
 Each table can reserve a footer for game-owned controls, and the view can reserve
 one shared footer below both tables. The game supplies drawing and input behavior.
 
@@ -26,11 +28,14 @@ one shared footer below both tables. The game supplies drawing and input behavio
 - [Core API](include/game_storage/storage.hpp), [stack API](include/game_storage/stacks.hpp),
   and [UI API](include/game_storage/ui.hpp)
 
-Item slots and drag-and-drop transfers are not implemented in this version. Stack
-operations are an optional logic module. Storage data can be saved and restored
+Item slots are not implemented in this version. Stack operations are an optional
+logic module. Storage data can be saved and restored
 through versioned JSON.
 
 ## Build and test
+
+GitHub Actions runs the full desktop build and tests on Windows, and a WebAssembly
+build and Node-based tests on Ubuntu. See [CI workflow](.github/workflows/ci.yml).
 
 Requires CMake 3.21+ and a C++17 compiler. Run from the repository root:
 
@@ -79,7 +84,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.8 CONFIG REQUIRED)
+find_package(game_storage 0.9 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 

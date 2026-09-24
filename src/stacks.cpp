@@ -39,6 +39,13 @@ QuantityResult StackOperations::quantity(const Storage& storage, ItemId id) cons
     return quantity(*item);
 }
 
+QuantityResult StackOperations::max_quantity(const Item& item) const {
+    if (!config_.max_quantity) return {StackStatus::success, std::numeric_limits<std::int64_t>::max()};
+    const auto limit = config_.max_quantity(item);
+    return limit > 0 ? QuantityResult{StackStatus::success, limit}
+                     : QuantityResult{StackStatus::invalid_stack_limit, 0};
+}
+
 StackResult StackOperations::extract_quantity(Storage& storage, ItemId id,
                                                std::int64_t amount) const {
     if (amount <= 0) return {StackStatus::invalid_amount};
@@ -51,6 +58,10 @@ StackResult StackOperations::extract_quantity(Storage& storage, ItemId id,
         auto extracted = storage.extract(id);
         return {StackStatus::success, id, std::move(extracted)};
     }
+
+    const auto limit = max_quantity(*source);
+    if (limit.status != StackStatus::success) return {limit.status};
+    if (amount > limit.value) return {StackStatus::stack_limit_exceeded};
 
     Item part = source->new_instance();
     part.set_entry_property(config_.quantity_property, amount);
@@ -69,6 +80,10 @@ StackResult StackOperations::split(Storage& storage, ItemId id, std::int64_t amo
     if (count.status != StackStatus::success) return {count.status};
     if (amount > count.value) return {StackStatus::insufficient_quantity};
     if (amount == count.value) return {StackStatus::not_partial};
+
+    const auto limit = max_quantity(*source);
+    if (limit.status != StackStatus::success) return {limit.status};
+    if (amount > limit.value) return {StackStatus::stack_limit_exceeded};
 
     Item part = source->new_instance();
     part.set_entry_property(config_.quantity_property, amount);
@@ -90,6 +105,9 @@ StackResult StackOperations::transfer_quantity_to(Storage& source_storage, ItemI
     const auto count = quantity(*source);
     if (count.status != StackStatus::success) return {count.status};
     if (amount > count.value) return {StackStatus::insufficient_quantity};
+    const auto limit = max_quantity(*source);
+    if (limit.status != StackStatus::success) return {limit.status};
+    if (amount > limit.value) return {StackStatus::stack_limit_exceeded};
     if (amount == count.value) {
         const auto status = map_transfer(source_storage.transfer_to(id, destination));
         return {status, status == StackStatus::success ? id : 0};
@@ -120,6 +138,10 @@ StackResult StackOperations::merge(Storage& source_storage, ItemId source_id,
     if (!config_.can_stack(*source, *target)) return {StackStatus::incompatible};
     if (source_count.value > std::numeric_limits<std::int64_t>::max() - target_count.value)
         return {StackStatus::quantity_overflow};
+    const auto limit = max_quantity(*target);
+    if (limit.status != StackStatus::success) return {limit.status};
+    if (source_count.value > limit.value - target_count.value)
+        return {StackStatus::stack_limit_exceeded};
 
     auto target_data = target->item_data();
     auto combined = target->entry_properties();

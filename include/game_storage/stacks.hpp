@@ -16,7 +16,9 @@ enum class StackStatus {
     same_storage,
     incompatible,
     quantity_overflow,
-    duplicate_id
+    duplicate_id,
+    stack_limit_exceeded,
+    invalid_stack_limit
 };
 
 struct QuantityResult {
@@ -35,10 +37,12 @@ struct StackResult {
 };
 
 using StackPredicate = std::function<bool(const Item&, const Item&)>;
+using StackLimit = std::function<std::int64_t(const Item&)>;
 
 struct StackConfig {
     StackPredicate can_stack;
     std::string quantity_property = "quantity";
+    StackLimit max_quantity; // Optional; absence means no limit.
 };
 
 // Optional rules layer. Storage itself does not interpret quantities.
@@ -49,6 +53,7 @@ public:
     // A missing quantity property means one. Present values must be positive int64.
     QuantityResult quantity(const Item& item) const;
     QuantityResult quantity(const Storage& storage, ItemId id) const;
+    QuantityResult max_quantity(const Item& item) const;
 
     // Full extraction preserves the original ID; partial extraction creates a new ID.
     StackResult extract_quantity(Storage& storage, ItemId id, std::int64_t amount) const;

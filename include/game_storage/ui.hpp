@@ -25,6 +25,8 @@ struct TableConfig {
     std::function<std::vector<Item>(std::vector<Item>, const Context&)> order;
     std::function<Tooltip(const Item&, const Storage&, const Context&)> tooltip;
     std::function<std::string(const ActionInfo&, const Context&)> action_label;
+    // Optional stack size for a single dragged row. Values <= 1 skip the picker.
+    std::function<std::int64_t(const Item&, const Storage&, const Context&)> drag_quantity;
 };
 struct Panel {
     Storage* storage = nullptr; // Must outlive the view and its update calls.
@@ -44,6 +46,7 @@ struct Input {
     bool left_pressed = false, left_down = false;
     bool right_pressed = false, escape = false;
     bool ctrl = false, shift = false;
+    bool left_released = false, enter = false;
 };
 struct RowFrame { ItemId id; Rect bounds; std::vector<Cell> cells; };
 struct PanelFrame {
@@ -64,14 +67,33 @@ struct MenuFrame {
     std::vector<MenuEntry> entries;
     bool more_above = false, more_below = false;
 };
+struct DragFrame {
+    std::size_t source_panel;
+    std::vector<ItemId> items;
+    Point pointer;
+    std::optional<std::size_t> destination_panel;
+    std::optional<ItemId> target_item;
+};
+struct QuantityFrame {
+    Rect bounds, minus, plus, track, thumb, confirm, cancel;
+    std::int64_t value = 1, maximum = 1;
+};
 struct Frame {
     std::vector<PanelFrame> panels;
     Rect shared_footer; // Full-width game-owned region below both panels (or one panel).
     std::optional<TooltipFrame> tooltip;
     std::optional<MenuFrame> menu;
+    std::optional<DragFrame> drag;
+    std::optional<QuantityFrame> quantity;
     bool captures_pointer = false;
 };
 struct ActionEvent { std::size_t panel; ItemId item; std::string action; ActionResult result; };
+struct DropEvent {
+    std::size_t source_panel, destination_panel;
+    std::vector<ItemId> items;
+    std::optional<ItemId> target_item;
+    std::optional<std::int64_t> quantity; // Set for a single stack after confirmation.
+};
 
 // No window, graphics API, asset loading, or game loop ownership.
 class View {
@@ -83,6 +105,7 @@ public:
     const Frame& frame() const noexcept { return frame_; }
     const std::optional<ActionEvent>& last_action() const noexcept { return last_action_; }
     const std::vector<ActionEvent>& last_actions() const noexcept { return last_actions_; }
+    const std::optional<DropEvent>& last_drop() const noexcept { return last_drop_; }
 
 private:
     struct State {
@@ -93,6 +116,8 @@ private:
     };
     struct Target { std::size_t panel; ItemId item; };
     struct Drag { std::size_t panel; bool horizontal; float offset; };
+    struct ItemDrag { std::size_t panel; Point origin; std::vector<ItemId> items; bool active = false; };
+    struct PendingQuantity { DropEvent drop; std::int64_t value, maximum; bool sliding = false; };
     Metrics metrics_;
     float shared_footer_height_ = 0;
     std::vector<Panel> panels_;
@@ -100,11 +125,14 @@ private:
     Frame frame_;
     std::optional<Target> hover_, menu_;
     std::optional<Drag> drag_;
+    std::optional<ItemDrag> item_drag_;
+    std::optional<PendingQuantity> pending_quantity_;
     Point menu_anchor_;
     float hover_time_ = 0;
     std::size_t menu_offset_ = 0;
     std::optional<ActionEvent> last_action_;
     std::vector<ActionEvent> last_actions_;
+    std::optional<DropEvent> last_drop_;
     void layout(Rect bounds, const Context& context);
     void layout_menu(Rect bounds, const Context& context);
 };

@@ -6,7 +6,7 @@ never inspect quantities or merge entries automatically. Games that do not need
 stacks can disable `GAME_STORAGE_BUILD_STACKS`.
 
 ```cmake
-find_package(game_storage 0.8 CONFIG REQUIRED COMPONENTS stacks)
+find_package(game_storage 0.9 CONFIG REQUIRED COMPONENTS stacks)
 target_link_libraries(my_game PRIVATE game_storage::stacks)
 ```
 
@@ -30,7 +30,8 @@ StackOperations stacks({
         return a.adapter_type() == b.adapter_type() &&
                a.item_data() == b.item_data();
     },
-    "quantity" // Optional; this is the default entry-property key.
+    "quantity", // Optional; this is the default entry-property key.
+    [](const Item& item) { return std::int64_t{item.item_data_value("type")->as<std::string>() == "arrow" ? 64 : 1}; }
 });
 ```
 
@@ -42,6 +43,9 @@ Operations never repair invalid data implicitly.
 The callback may compare any item data or entry properties needed by the game.
 Avoid changing storage or external state from it. Other properties do not affect
 compatibility unless the callback checks them.
+The optional third callback returns the maximum quantity for an item; omit it for
+unlimited stacks. It must return a positive value. A nonpositive result reports
+`invalid_stack_limit`. The callback can use item data or captured game state.
 
 ## Operations
 
@@ -75,9 +79,13 @@ Partial entries copy the source item data, adapter type, and all entry propertie
 then replace the configured quantity. `Item::new_instance()` exposes the same
 new-ID cloning primitive for other optional rule modules.
 
-No operation checks weight, capacity, ownership, maximum stack size, or other game
-rules. Check them before calling the technical operation. There is no automatic
-merge on add or transfer.
+The optional maximum is checked when an operation creates a new stack or transfers
+one, and before merging into the destination. An oversized result reports
+`stack_limit_exceeded` without changing storage. Existing oversized entries are
+not modified automatically; direct core `add` and `transfer_to` still ignore the
+limit. No operation checks weight, storage capacity, ownership, or other game rules.
+Check those before calling the technical operation. There is no automatic merge
+on add or transfer.
 
 ## Statuses and failure behavior
 

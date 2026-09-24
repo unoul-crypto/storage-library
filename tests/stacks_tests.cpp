@@ -119,11 +119,37 @@ void validation() {
     catch (const std::invalid_argument&) { threw = true; }
     check(threw, "Quantity key required");
 }
+void limits() {
+    StackOperations limited({[](const Item& a, const Item& b) {
+        return a.item_data() == b.item_data();
+    }, "quantity", [](const Item&) { return std::int64_t{5}; }});
+    Storage source, destination;
+    Item six = stack("arrow", 6), two = stack("arrow", 2);
+    source.add(six); destination.add(two);
+    check(limited.max_quantity(six).value == 5, "Maximum quantity comes from callback");
+    check(limited.transfer_quantity_to(source, six.id(), 6, destination).status == StackStatus::stack_limit_exceeded,
+          "Oversized transferred entry is rejected");
+    check(limited.split(source, six.id(), 5).status == StackStatus::success,
+          "Split at maximum succeeds");
+    check(limited.merge(source, six.id(), destination, two.id()).status == StackStatus::success,
+          "Merge within maximum succeeds");
+    const auto rest = source.items().front();
+    check(limited.merge(source, rest.id(), destination, two.id()).status == StackStatus::stack_limit_exceeded,
+          "Merge above maximum is rejected");
+    check(source.contains(rest.id()) && limited.quantity(destination, two.id()).value == 3,
+          "Failed merge leaves both entries unchanged");
+    check(limited.extract_quantity(source, rest.id(), 5).status == StackStatus::success,
+          "Extraction up to maximum succeeds");
+    StackOperations invalid_limit({[](const Item&, const Item&) { return true; }, "quantity",
+                                   [](const Item&) { return std::int64_t{0}; }});
+    check(invalid_limit.max_quantity(two).status == StackStatus::invalid_stack_limit,
+          "Nonpositive maximum is reported");
+}
 }
 
 int main() {
     try {
-        quantities_and_cloning(); extraction_and_split(); transfers_and_merges(); validation();
+        quantities_and_cloning(); extraction_and_split(); transfers_and_merges(); validation(); limits();
         std::cout << "Passed " << checks << " stack checks\n";
         return 0;
     } catch (const std::exception& error) {

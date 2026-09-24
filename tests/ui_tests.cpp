@@ -325,9 +325,77 @@ void custom_regions() {
     check(frame.shared_footer.height == 0 && !frame.captures_pointer,
           "Closed view has no shared region or pointer capture");
 }
+void drag_and_quantity() {
+    Storage a, b;
+    Item first({{"name", "stack"}}, {{"quantity", 5}}), second({{"name", "single"}});
+    a.add(first); a.add(second);
+    auto table = config();
+    table.drag_quantity = [](const Item& item, const Storage&, const Context&) {
+        const auto value = item.entry_property("quantity");
+        return value ? value->as<std::int64_t>() : std::int64_t{1};
+    };
+    gui::View view;
+    view.set_panels({{&a, "A", table}, {&b, "B", table}});
+    const gui::Rect bounds{0, 0, 800, 400};
+    const Context context{{"label", "Text"}};
+    auto frame = view.update(bounds, {}, context);
+    gui::Input input;
+    input.mouse = center(frame.panels[0].rows[0].bounds);
+    input.left_pressed = input.left_down = true;
+    view.update(bounds, input, context);
+    input = {}; input.left_down = true; input.mouse = center(frame.panels[1].body);
+    frame = view.update(bounds, input, context);
+    check(frame.drag && frame.drag->destination_panel == 1 && frame.drag->items == std::vector<ItemId>{first.id()},
+          "Drag preview identifies destination and selected item");
+    input.left_down = false; input.left_released = true;
+    frame = view.update(bounds, input, context);
+    check(!view.last_drop() && a.size() == 2 && b.size() == 0, "Drop waits for quantity choice without moving data");
+    input = {}; frame = view.update(bounds, input, context);
+    check(frame.quantity && frame.quantity->maximum == 5 && frame.quantity->value == 5,
+          "Single stack opens quantity picker");
+    input.mouse = center(frame.quantity->minus); input.left_pressed = true;
+    frame = view.update(bounds, input, context);
+    check(frame.quantity && frame.quantity->value == 4, "Quantity can be decremented");
+    input = {}; input.mouse = center(frame.quantity->confirm); input.left_pressed = true;
+    view.update(bounds, input, context);
+    check(view.last_drop() && view.last_drop()->quantity == 4 && view.last_drop()->source_panel == 0 &&
+          view.last_drop()->destination_panel == 1, "Confirmed amount arrives in drop event");
+    check(a.size() == 2 && b.size() == 0, "UI never mutates storages");
+    view.update(bounds, {}, context);
+    check(!view.last_drop(), "Drop event clears next frame");
+
+    frame = view.update(bounds, {}, context);
+    input = {}; input.mouse = center(frame.panels[0].rows[0].bounds);
+    input.left_pressed = input.left_down = true;
+    view.update(bounds, input, context);
+    input = {}; input.left_down = true; input.mouse = center(frame.panels[1].body);
+    view.update(bounds, input, context);
+    input = {}; input.mouse = center(frame.panels[1].body); input.left_released = true;
+    view.update(bounds, input, context);
+    frame = view.update(bounds, {}, context);
+    input = {}; input.mouse = center(frame.quantity->cancel); input.left_pressed = true;
+    view.update(bounds, input, context);
+    check(!view.last_drop() && !view.frame().quantity, "Cancelled amount does not emit transfer");
+
+    frame = view.update(bounds, {}, context);
+    input = {}; input.mouse = center(frame.panels[0].rows[0].bounds); input.left_pressed = true;
+    frame = view.update(bounds, input, context);
+    input = {}; input.mouse = center(frame.panels[0].rows[1].bounds); input.left_pressed = input.ctrl = true;
+    frame = view.update(bounds, input, context);
+    input = {}; input.mouse = center(frame.panels[0].rows[0].bounds);
+    input.left_pressed = input.left_down = true;
+    view.update(bounds, input, context);
+    input = {}; input.left_down = true; input.mouse = center(frame.panels[1].body);
+    view.update(bounds, input, context);
+    input = {}; input.mouse = center(frame.panels[1].body); input.left_released = true;
+    view.update(bounds, input, context);
+    check(view.last_drop() && view.last_drop()->items.size() == 2 && !view.last_drop()->quantity,
+          "Dragging selection emits one group event without a quantity picker");
+}
 }
 int main() {
-    try { interaction(); menus(); ordering_and_validation(); multiple_selection_and_actions(); range_across_scrolled_rows(); custom_regions(); }
+    try { interaction(); menus(); ordering_and_validation(); multiple_selection_and_actions();
+          range_across_scrolled_rows(); custom_regions(); drag_and_quantity(); }
     catch (const std::exception& error) { std::cerr << "Check " << checks << ": " << error.what() << '\n'; return 1; }
     std::cout << "Passed " << checks << " UI checks\n";
 }

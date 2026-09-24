@@ -9,7 +9,8 @@ Three independent CMake targets are available:
 | `game_storage::raylib` | Text, PNG textures, colors, mouse/keyboard adapter | UI and raylib |
 
 `GAME_STORAGE_BUILD_UI` defaults to ON; `GAME_STORAGE_BUILD_RAYLIB` defaults to OFF.
-Set both OFF to build only the core. No dependency is downloaded automatically.
+Set both OFF to build only the core. The graphical example also needs the stacks
+module. No dependency is downloaded automatically.
 The UI module can be used with a custom renderer by consuming `ui::Frame`.
 
 ## Build the graphical example
@@ -122,7 +123,7 @@ table.order = [](std::vector<Item> items, const Context&) {
 Pass one panel for a full-width table or two for equal-width tables side by side.
 `set_panels({})` closes everything. `set_panels` resets selection, offsets, and
 popups. Storage pointers are borrowed and must stay valid; configurations and
-callbacks are copied. Content/order/tooltip/label callbacks must be pure and must
+callbacks are copied. Content/order/tooltip/label/drag-quantity callbacks must be pure and must
 not mutate the view or storages during an update. They may run more than once per
 frame. Handlers registered on the core storage may change its contents.
 
@@ -244,8 +245,38 @@ are single-threaded and synchronous. Avoid reentrant updates from callbacks.
 - Escape or an outside click dismisses the menu without clicking through. Disabled
   actions leave it open; other results close it. Menus with many actions scroll by
   wheel, with colored edge indicators for additional entries.
-- No drag-and-drop transfers are built in. Add a core action handler that performs
-  the game's desired transfer if needed.
+- Drag a row or an already selected group to the other table. `Frame::drag` gives
+  the renderer a live preview, including the destination panel and hovered item.
+  Releasing over that table emits `View::last_drop()` for one update, with source
+  and destination panel indexes, selected IDs in display order, and optional
+  destination row ID. Releasing elsewhere or pressing Escape cancels it. The view
+  does not change either storage; the game handles the event and can reject any
+  transfer according to its own rules.
+- Set `TableConfig::drag_quantity` to return the current quantity for a row. When
+  a single dragged row has more than one, the built-in picker opens after the drop.
+  Its slider and +/- buttons choose 1 through that quantity. Confirming (or Enter)
+  emits `DropEvent::quantity`; Cancel or Escape emits nothing. Group drags always
+  request the full entries, leaving per-item choices to the game. A missing
+  callback skips the picker and leaves `DropEvent::quantity` empty.
+
+For example, a game can route a drop through the optional stack operations module:
+
+```cpp
+if (view.last_drop()) {
+    const auto& drop = *view.last_drop();
+    Storage& source = drop.source_panel == 0 ? chest : bag;
+    Storage& destination = drop.destination_panel == 0 ? chest : bag;
+    for (ItemId id : drop.items) {
+        const auto count = stacks.quantity(source, id);
+        if (count.status == StackStatus::success)
+            stacks.transfer_quantity_to(source, id, drop.quantity.value_or(count.value), destination);
+    }
+}
+```
+
+The snippet assumes `stacks` is a configured `StackOperations` object and the
+application includes `game_storage/stacks.hpp`. Check capacity and other game rules
+before transfer. The [graphical example](../examples/table.cpp) shows that check.
 
 Change row/header sizes, panel gap, tooltip delay/width and menu dimensions through
 `Metrics` at construction. `RaylibRenderer::theme()` exposes colors, font, padding,
@@ -253,7 +284,7 @@ font size and image size. A custom font is borrowed; the game loads the desired
 glyphs and owns its lifetime. Default display strings are English.
 
 PNG paths are loaded lazily and cached by the default renderer. Missing images get
-a placeholder and are not retried until `clear_images()`. A supplied `ImageResolver`
+  a placeholder and are not retried until `clear_images()`. A supplied `ImageResolver`
 can map asset keys to existing game textures; those textures are borrowed and never
 unloaded by the renderer. Preserve them until drawing completes. Example icons are
 original procedural pixel-art PNGs included in `examples/assets`.
@@ -278,6 +309,7 @@ Draw the resulting `Frame` using the game's own graphics API:
 - Start column drawing at `body.x - scroll_x`; row bounds already include vertical
   scrolling. Clip row content to `body` and headings to `header`.
 - Draw the optional tooltip and menu after the panels, using their supplied bounds.
+  Draw `Frame::drag` and `Frame::quantity` above the panels if present.
   Draw `Frame::shared_footer` below the panels if enabled.
   Resolve each `Cell::png` asset key through the game's own texture system.
 - `captures_pointer` tells the host whether to withhold pointer input from the

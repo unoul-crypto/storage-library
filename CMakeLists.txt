@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.21)
-project(game_storage VERSION 0.8.0 LANGUAGES CXX)
+project(game_storage VERSION 0.9.0 LANGUAGES CXX)
 include(GNUInstallDirs)
 
 option(GAME_STORAGE_BUILD_TESTS "Build core tests" ${PROJECT_IS_TOP_LEVEL})
@@ -67,9 +67,9 @@ if(GAME_STORAGE_BUILD_RAYLIB)
     install(TARGETS game_storage_raylib EXPORT game_storageRaylibTargets ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
     install(EXPORT game_storageRaylibTargets NAMESPACE game_storage::
         DESTINATION ${CMAKE_INSTALL_LIBDIR}/cmake/game_storage)
-    if(GAME_STORAGE_BUILD_EXAMPLES)
+    if(GAME_STORAGE_BUILD_EXAMPLES AND GAME_STORAGE_BUILD_STACKS)
         add_executable(storage_ui_example examples/table.cpp)
-        target_link_libraries(storage_ui_example PRIVATE game_storage::raylib)
+        target_link_libraries(storage_ui_example PRIVATE game_storage::raylib game_storage::stacks)
         file(COPY examples/assets DESTINATION ${CMAKE_CURRENT_BINARY_DIR})
         if(EMSCRIPTEN)
             set_target_properties(storage_ui_example PROPERTIES SUFFIX ".html")
