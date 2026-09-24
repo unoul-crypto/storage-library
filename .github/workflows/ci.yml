@@ -11,13 +11,13 @@ jobs:
   desktop:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Get raylib 6.0
         shell: pwsh
         run: git clone --depth 1 --branch 6.0 https://github.com/raysan5/raylib.git raylib
       - name: Configure
         shell: pwsh
-        run: cmake -S . -B build/ci-desktop -G "Visual Studio 17 2022" -A x64 -DGAME_STORAGE_BUILD_RAYLIB=ON -DGAME_STORAGE_RAYLIB_SOURCE_DIR="$PWD/raylib"
+        run: cmake -S . -B build/ci-desktop -G "Visual Studio 18 2026" -A x64 -DGAME_STORAGE_BUILD_RAYLIB=ON -DGAME_STORAGE_RAYLIB_SOURCE_DIR="$PWD/raylib"
       - name: Build
         run: cmake --build build/ci-desktop --config Release --parallel 4
       - name: Test
@@ -26,7 +26,7 @@ jobs:
   browser:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - name: Get raylib 6.0 and Emscripten
         run: |
           git clone --depth 1 --branch 6.0 https://github.com/raysan5/raylib.git raylib
