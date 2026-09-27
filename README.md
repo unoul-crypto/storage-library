@@ -7,6 +7,7 @@ interface. Developers own game rules, item presentation, ordering, and actions.
 | --- | --- |
 | `game_storage::game_storage` | Items, parameters, extraction, transfers, and actions; no graphics dependencies |
 | `game_storage::stacks` | Optional quantity, splitting, partial transfer, merging, and stack limits; core dependency only |
+| `game_storage::sync` | Optional revision-checked JSON deltas between storage snapshots; core dependency only |
 | `game_storage::ui` | Table layout, scrolling, selection, drag-and-drop events, quantity picker, tooltips, and menus; no rendering API |
 | `game_storage::raylib` | Optional raylib drawing, PNG loading, and input adapter |
 
@@ -24,8 +25,10 @@ one shared footer below both tables. The game supplies drawing and input behavio
 - [UI setup, customization, and graphical demo](docs/ui.md)
 - [Core usage example](examples/basic.cpp)
 - [Optional stack operations](docs/stacks.md)
+- [Optional synchronization module](docs/sync.md)
 - [Two-storage UI example](examples/table.cpp)
 - [Core API](include/game_storage/storage.hpp), [stack API](include/game_storage/stacks.hpp),
+  [sync API](include/game_storage/sync.hpp),
   and [UI API](include/game_storage/ui.hpp)
 
 Item slots are not implemented in this version. Stack operations are an optional
@@ -54,12 +57,14 @@ CMake version requested by that checkout (3.25+ for the tested raylib 6.0 checko
 | --- | --- | --- |
 | `GAME_STORAGE_BUILD_UI` | `ON` | Build renderer-independent UI behavior |
 | `GAME_STORAGE_BUILD_STACKS` | `ON` | Build optional stack operations |
+| `GAME_STORAGE_BUILD_SYNC` | `ON` | Build optional revision-checked deltas |
 | `GAME_STORAGE_BUILD_RAYLIB` | `OFF` | Build the renderer; requires UI and raylib |
 | `GAME_STORAGE_RAYLIB_SOURCE_DIR` | Empty | Use an existing raylib source directory instead of finding an installed package |
 | `GAME_STORAGE_BUILD_TESTS` | `ON` for standalone builds | Build core and enabled UI tests |
 | `GAME_STORAGE_BUILD_EXAMPLES` | `ON` for standalone builds | Build the core example and, if enabled, the graphical example |
 
-For the core alone, also set `-DGAME_STORAGE_BUILD_STACKS=OFF`, alongside both UI
+For the core alone, also set `-DGAME_STORAGE_BUILD_STACKS=OFF` and
+`-DGAME_STORAGE_BUILD_SYNC=OFF`, alongside both UI
 options. No dependencies are downloaded automatically.
 
 On Windows, if CMake is not on PATH, set a PowerShell variable to its executable
@@ -84,7 +89,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.10 CONFIG REQUIRED)
+find_package(game_storage 0.11 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -273,8 +278,9 @@ missing key, or attempting a rejected operation leaves the revision unchanged.
 Reading data and changing the runtime action provider do not affect it.
 
 Stack operations use those primitives, so a split can advance one storage twice
-(new entry and reduced source). A revision is a state marker, not yet a change log
-or a unique network identity. Loading JSON replaces the current revision with the
+(new entry and reduced source). A revision is a state marker, not a change log
+or a unique network identity. The optional [sync module](docs/sync.md) compares
+two snapshots to build a delta. Loading JSON replaces the current revision with the
 saved one, including a possible decrease. The game must identify which storage a
 snapshot belongs to and request a full snapshot when a client's revision does not
 match its expected history. Once the counter reaches its maximum value, further

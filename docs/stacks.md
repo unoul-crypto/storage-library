@@ -6,7 +6,7 @@ never inspect quantities or merge entries automatically. Games that do not need
 stacks can disable `GAME_STORAGE_BUILD_STACKS`.
 
 ```cmake
-find_package(game_storage 0.10 CONFIG REQUIRED COMPONENTS stacks)
+find_package(game_storage 0.11 CONFIG REQUIRED COMPONENTS stacks)
 target_link_libraries(my_game PRIVATE game_storage::stacks)
 ```
 
