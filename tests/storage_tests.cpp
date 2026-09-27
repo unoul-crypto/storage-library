@@ -219,7 +219,8 @@ void json_snapshots() {
     original.add(first);
     original.add(second);
     const auto json = original.to_json();
-    check(json.find("\"version\":3") != std::string::npos, "Snapshot declares version 3");
+    check(json.find("\"version\":4") != std::string::npos, "Snapshot declares version 4");
+    check(json.find("\"revision\":\"2\"") != std::string::npos, "Snapshot saves revision as text");
     check(json.find("\"item_data\":") != std::string::npos &&
           json.find("\"properties\":") != std::string::npos,
           "Snapshot stores item data and entry properties separately");
@@ -233,7 +234,8 @@ void json_snapshots() {
         return std::vector<Action>{};
     });
     restored.load_json(json);
-    check(restored.to_json() == json, "Snapshot round-trips exactly");
+    check(restored.to_json() == json && restored.revision() == original.revision(),
+          "Snapshot and revision round-trip exactly");
     check(restored.items()[0].id() == first.id() && restored.items()[1].id() == second.id(), "IDs and order survive load");
     check(restored.items()[0].parameter("fraction")->as<double>() == 1.0, "Double remains double");
     check(restored.items()[0].parameter("zero")->as<double>() == 0.0, "Negative zero remains double");
@@ -247,7 +249,12 @@ void json_snapshots() {
 
     const auto before = restored.to_json();
     const std::vector<std::string> invalid = {
-        "", "{", "[]", json + " trailing", "{\"version\":4,\"parameters\":{},\"items\":[]}",
+        "", "{", "[]", json + " trailing", "{\"version\":5,\"parameters\":{},\"items\":[]}",
+        "{\"version\":4,\"parameters\":{},\"items\":[]}",
+        "{\"version\":4,\"revision\":-1,\"parameters\":{},\"items\":[]}",
+        "{\"version\":4,\"revision\":\"01\",\"parameters\":{},\"items\":[]}",
+        "{\"version\":4,\"revision\":\"18446744073709551616\",\"parameters\":{},\"items\":[]}",
+        "{\"version\":4,\"revision\":\"0\",\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":{}}]}",
         "{\"version\":3,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{},\"properties\":{}}]}",
         "{\"version\":3,\"parameters\":{},\"items\":[{\"id\":\"1\",\"type\":null,\"item_data\":{},\"properties\":{}}]}",
         "{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"1\",\"item_data\":{}}]}",
@@ -294,8 +301,8 @@ void json_snapshots() {
     check(migrated.item(42)->item_data_value("quantity") == std::optional<Value>{5} &&
           migrated.item(42)->entry_properties().empty(),
           "Version 1 item parameters migrate wholly to item_data");
-    check(migrated.to_json().find("\"version\":3") != std::string::npos,
-          "Loaded version 1 data is saved as version 3");
+    check(migrated.to_json().find("\"version\":4") != std::string::npos && migrated.revision() == 0,
+          "Loaded version 1 data is saved as version 4 with baseline revision");
 
     Storage version_two;
     version_two.load_json("{\"version\":2,\"parameters\":{},\"items\":[{\"id\":\"43\",\"item_data\":{\"type\":\"potion\"},\"properties\":{\"quantity\":4}}]}");
@@ -303,13 +310,82 @@ void json_snapshots() {
           version_two.item(43)->entry_property("quantity") == std::optional<Value>{4},
           "Version 2 loads with an empty saved adapter type");
 
+    Storage version_three;
+    version_three.load_json("{\"version\":3,\"parameters\":{},\"items\":[{\"id\":\"44\",\"type\":\"game.potion\",\"item_data\":{},\"properties\":{}}]}");
+    check(version_three.revision() == 0 && version_three.item(44)->adapter_type() == "game.potion",
+          "Version 3 snapshot keeps saved type and starts at baseline revision");
+
     Storage with_properties;
     Item stack(Parameters{{"type", "potion"}}, Parameters{{"quantity", 7}});
     with_properties.add(stack);
     Storage round_trip;
     round_trip.load_json(with_properties.to_json());
     check(round_trip.item(stack.id())->entry_property("quantity") == std::optional<Value>{7},
-          "Entry properties survive version 3 JSON round-trip");
+          "Entry properties survive version 4 JSON round-trip");
+}
+
+void revisions() {
+    Storage a({{"initial", true}}), b;
+    check(a.revision() == 0, "New storage begins at revision zero");
+    Item item;
+    check(a.add(item) == AddResult::added && a.revision() == 1, "Add advances revision");
+    check(a.add(item) == AddResult::duplicate_id && a.revision() == 1, "Duplicate add does not advance revision");
+    a.set_parameter("initial", true);
+    check(a.revision() == 1, "Unchanged parameter does not advance revision");
+    a.set_parameter("initial", false);
+    check(a.revision() == 2, "Changed storage parameter advances revision");
+    check(!a.remove_parameter("missing") && a.revision() == 2, "Missing parameter removal is a no-op");
+    check(a.remove_parameter("initial") && a.revision() == 3, "Parameter removal advances revision");
+    check(!a.set_entry_property(0, "quantity", 1) && a.revision() == 3,
+          "Missing item mutation is a no-op");
+    check(a.set_entry_property(item.id(), "quantity", 2) && a.revision() == 4,
+          "Entry property mutation advances revision");
+    check(a.set_entry_property(item.id(), "quantity", 2) && a.revision() == 4,
+          "Identical entry property leaves revision unchanged");
+    check(a.remove_entry_property(item.id(), "quantity") && a.revision() == 5,
+          "Entry property removal advances revision");
+    check(a.set_item_data_value(item.id(), "name", "Potion") && a.revision() == 6,
+          "Item data mutation advances revision");
+    check(a.set_item_parameter(item.id(), "name", "Potion") && a.revision() == 6,
+          "Compatibility setter does not double-count unchanged data");
+    check(a.remove_item_parameter(item.id(), "name") && a.revision() == 7,
+          "Compatibility removal advances revision once");
+    check(a.set_item_adapter_type(item.id(), "game.potion") && a.revision() == 8,
+          "Adapter type change advances revision");
+    check(a.set_item_adapter_type(item.id(), "game.potion") && a.revision() == 8,
+          "Unchanged adapter type is a no-op");
+    check(a.replace_item_content(item.id(), Parameters{}, Parameters{}) && a.revision() == 8,
+          "Identical content replacement is a no-op");
+    check(a.replace_item_content(item.id(), {{"power", 2}}, {}) && a.revision() == 9,
+          "Content replacement advances revision once");
+    a.set_action_provider({});
+    a.items(); a.item(item.id()); a.to_json();
+    check(a.revision() == 9, "Runtime provider and reads do not change revision");
+    check(a.transfer_to(item.id(), a) == TransferResult::same_storage && a.revision() == 9,
+          "Rejected transfer does not change revision");
+    check(a.transfer_to(item.id(), b) == TransferResult::transferred && a.revision() == 10 &&
+          b.revision() == 1, "Transfer advances both storage revisions once");
+    check(!a.extract(item.id()) && a.revision() == 10, "Missing extraction does not change revision");
+    check(b.extract(item.id()) && b.revision() == 2, "Extraction advances revision");
+    Storage conflict_source, conflict_destination;
+    conflict_source.add(item); conflict_destination.add(item);
+    check(conflict_source.transfer_to(item.id(), conflict_destination) == TransferResult::duplicate_id &&
+          conflict_source.revision() == 1 && conflict_destination.revision() == 1,
+          "Rejected transfer leaves both revisions unchanged");
+
+    a.load_json("{\"version\":3,\"parameters\":{},\"items\":[]}");
+    check(a.revision() == 0, "Loading an older snapshot replaces the previous revision");
+
+    Storage max_revision;
+    max_revision.load_json("{\"version\":4,\"revision\":\"18446744073709551615\",\"parameters\":{\"x\":1},\"items\":[]}");
+    check(max_revision.revision() == std::numeric_limits<std::uint64_t>::max(),
+          "Full unsigned revision range survives JSON");
+    max_revision.set_parameter("x", 1);
+    bool overflow = false;
+    try { max_revision.set_parameter("x", 2); } catch (const std::overflow_error&) { overflow = true; }
+    check(overflow && max_revision.parameter("x") == std::optional<Value>{1} &&
+          max_revision.revision() == std::numeric_limits<std::uint64_t>::max(),
+          "Revision overflow rejects mutation atomically");
 }
 } // namespace
 
@@ -322,6 +398,7 @@ int main() {
         actions();
         callback_errors();
         json_snapshots();
+        revisions();
         std::cout << "Passed " << checks << " checks\n";
         return 0;
     } catch (const std::exception& error) {

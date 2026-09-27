@@ -84,7 +84,7 @@ cmake --install build/desktop --config Release --prefix install
 ```
 
 ```cmake
-find_package(game_storage 0.9 CONFIG REQUIRED)
+find_package(game_storage 0.10 CONFIG REQUIRED)
 target_link_libraries(my_game PRIVATE game_storage::game_storage)
 ```
 
@@ -183,7 +183,7 @@ concrete type is chosen at runtime.
 
 Older saves have no adapter type. After the game identifies such an entry from its
 data, `adapters.bind<T>(storage, id)` assigns the registered saved type so later
-`get<T>` calls and version 3 saves use automatic selection.
+`get<T>` calls and current saves use automatic selection.
 
 Saved type IDs must be nonempty and unique, and each C++ type can have one adapter
 per registry. Use stable names independent of compiler type names. Missing
@@ -222,7 +222,7 @@ destination-specific property (for example, a slot number) when appropriate.
 ## Saving and loading JSON
 
 `Storage::to_json()` returns a UTF-8 JSON string. `Storage::load_json()` replaces
-the receiving storage's items and parameters from that string. The library leaves
+the receiving storage's items, parameters, and revision from that string. The library leaves
 file I/O to the game:
 
 ```cpp
@@ -236,16 +236,17 @@ restored.load_json(save_data);
 The format is versioned. A minimal snapshot looks like this:
 
 ```json
-{"version":3,"parameters":{"label":"Chest"},"items":[{"id":"42","type":"my_game.sword","item_data":{"name":"Iron sword","durability":80},"properties":{"quantity":2}}]}
+{"version":4,"revision":"7","parameters":{"label":"Chest"},"items":[{"id":"42","type":"my_game.sword","item_data":{"name":"Iron sword","durability":80},"properties":{"quantity":2}}]}
 ```
 
-`to_json()` writes version 3. `load_json()` also accepts versions 1 and 2. Version
+`to_json()` writes version 4. `load_json()` also accepts versions 1, 2, and 3.
+Older snapshots have no revision and load with revision 0. Version
 2 entries receive an empty saved adapter type. For version 1, the loader migrates
 each old item's `parameters` into `item_data` and initializes its entry
 `properties` to `{}`. It does not infer that a legacy `quantity` key belonged to
 entry properties; games may move that key explicitly after loading if needed.
 
-IDs are decimal **strings**, so the full 64-bit range survives JavaScript JSON
+IDs and the revision are decimal **strings**, so the full 64-bit range survives JavaScript JSON
 handling. The loader preserves item order, IDs, nested values, and the difference
 between integers and doubles. A new item created after loading receives an ID
 above every restored ID. Existing runtime action providers remain attached to the
@@ -260,6 +261,24 @@ every storage it needs. IDs are unique among newly created items in one linked
 library instance, but copying an item or loading the same snapshot into two
 storages can intentionally create the same ID in both. Cross-storage ownership
 remains the game's responsibility.
+
+## Storage revisions
+
+`storage.revision()` returns a per-storage unsigned 64-bit counter. A new storage
+starts at 0, even if constructed with parameters. Each successful primitive data
+change increments the counter once: adding or extracting an item, changing its
+content or saved type, or changing a storage parameter. A successful transfer
+increments both source and destination. Repeating an identical setter, removing a
+missing key, or attempting a rejected operation leaves the revision unchanged.
+Reading data and changing the runtime action provider do not affect it.
+
+Stack operations use those primitives, so a split can advance one storage twice
+(new entry and reduced source). A revision is a state marker, not yet a change log
+or a unique network identity. Loading JSON replaces the current revision with the
+saved one, including a possible decrease. The game must identify which storage a
+snapshot belongs to and request a full snapshot when a client's revision does not
+match its expected history. Once the counter reaches its maximum value, further
+data changes throw `std::overflow_error` before mutating storage.
 
 ## Actions
 

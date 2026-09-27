@@ -134,6 +134,7 @@ public:
     std::optional<Item> item(ItemId id) const;
     bool contains(ItemId id) const;
     std::size_t size() const noexcept { return items_.size(); }
+    std::uint64_t revision() const noexcept { return revision_; }
 
     Parameters parameters() const { return parameters_; }
     std::optional<Value> parameter(const std::string& key) const;
@@ -150,7 +151,7 @@ public:
     // Atomically replaces both dictionaries, preserving the entry ID and order.
     bool replace_item_content(ItemId id, Parameters item_data, Parameters entry_properties);
 
-    // Versioned JSON snapshot; ID strings preserve the full uint64_t range.
+    // Versioned JSON snapshot; ID and revision strings preserve the full uint64_t range.
     std::string to_json() const;
     void load_json(std::string_view json); // Replaces data atomically; throws on invalid input.
 
@@ -160,10 +161,12 @@ public:
                                 const Context& context = {});
 
 private:
+    void ensure_revision_available() const;
     std::vector<Item>::iterator find(ItemId id);
     std::vector<Item>::const_iterator find(ItemId id) const;
     std::vector<Item> items_;
     Parameters parameters_;
+    std::uint64_t revision_ = 0;
     ActionProvider action_provider_;
 };
 
